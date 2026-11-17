@@ -1,0 +1,4 @@
+_inbox/
+.env
+__pycache__/
+.venv/
