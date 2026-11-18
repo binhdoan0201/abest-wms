@@ -1,4 +1,30 @@
+# Thư mục gốc chứa tài liệu nguồn & biến môi trường (bắt buộc theo U3)
 _inbox/
 .env
 __pycache__/
 .venv/
+
+# Python bytecode & cache
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Phân phối / Gói cài đặt
+build/
+dist/
+*.egg-info/
+
+# Báo cáo coverage
+.coverage
+htmlcov/
+
+# Cấu hình IDE & công cụ cá nhân
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Log files
+*.log
