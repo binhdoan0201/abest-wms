@@ -26,7 +26,10 @@ git checkout develop
 ### Bước 2: Khởi tạo môi trường ảo và cài đặt thư viện
 ```bash
 # Cách 1: Dùng Makefile
+# Trên Linux/macOS:
 make install
+# Trên Windows (PowerShell / Command Prompt):
+.\make.bat install
 
 # Cách 2: Thủ công qua Python
 python -m venv .venv
@@ -45,7 +48,10 @@ pip install -r client/requirements.txt
 
 ### Bước 3: Cấu hình biến môi trường
 ```bash
+# Trên Linux/macOS hoặc PowerShell:
 cp .env.example .env
+# Trên Windows Command Prompt (cmd.exe):
+copy .env.example .env
 # Chỉnh sửa .env nếu cần thay đổi thông tin kết nối CSDL
 ```
 
@@ -58,11 +64,17 @@ cp .env.example .env
 docker compose up -d
 
 # Nạp schema, patch và dữ liệu mẫu:
+# Trên Linux/macOS:
 make db-reset
+# Trên Windows:
+.\make.bat db-reset
 # (hoặc: bash scripts/reset_db.sh)
 
 # Chạy bài kiểm thử CSDL:
+# Trên Linux/macOS:
 make db-test
+# Trên Windows:
+.\make.bat db-test
 # (hoặc: bash scripts/run_db_tests.sh)
 ```
 
@@ -118,14 +130,14 @@ make ci
 Quy trình thực hiện tuần tự:
 1. `make lint`: Kiểm tra định dạng chuẩn với Black và Ruff (`black --check .`, `ruff check .`).
 2. `make typecheck`: Kiểm tra kiểu tĩnh với MyPy (`mypy server client scripts`).
-3. `make db-test`: Kiểm thử CSDL với script `scripts/run_db_tests.sh` (CSDL tạm, smoke test, idempotent patch lần 2, test seed).
+3. `make db-test` (hoặc `.\make.bat db-test` trên Windows): Kiểm thử CSDL với script `scripts/run_db_tests.sh` (CSDL tạm, smoke test, idempotent patch lần 2, test seed).
 4. `make test`: Chạy toàn bộ 63 bài kiểm thử tự động với Pytest (kiểm thử đơn vị, kiểm thử tích hợp, kiểm thử kiến trúc AST).
 
 Bạn cũng có thể chạy riêng lẻ từng bước:
 ```bash
 make lint       # Định dạng mã nguồn
 make typecheck  # Kiểu tĩnh MyPy
-make db-test    # Kiểm thử CSDL
+make db-test    # Kiểm thử CSDL (Windows: .\make.bat db-test)
 make test       # Kiểm thử Pytest (server/tests)
 ```
 
