@@ -183,3 +183,30 @@ class Pallet(Base):
         DateTime(timezone=True),
         server_default=text("now()"),
     )
+
+
+class InventoryAllocation(Base):
+    """Mô hình ORM bảng `inventory_allocations` (bổ sung từ patch v4.2.1)."""
+
+    __tablename__ = "inventory_allocations"
+
+    allocation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    order_line_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    balance_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    lot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    qty_allocated: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False)
+    qty_picked: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+    )

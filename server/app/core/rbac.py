@@ -84,38 +84,40 @@ def get_current_user(
     )
 
 
-def require_permission(permission_code: str) -> Callable[..., str]:
-    """Dependency factory yêu cầu người dùng phải có quyền `permission_code`.
+def require_permission(*permission_codes: str) -> Callable[..., str]:
+    """Dependency factory yêu cầu người dùng phải có ít nhất một quyền trong `permission_codes`.
 
     Quy định bảo mật đặc thù ABEST WMS:
     - Trả về `access_type` (V, X, V_OWN, X_OWN...).
     - Vai trò `admin` bị CHẶN tuyệt đối khỏi mọi quyền nghiệp vụ kho (chỉ được cấp AD-1...).
-    - Nếu không có quyền, trả HTTP 403 FORBIDDEN.
+    - Nếu không có quyền nào hợp lệ, trả HTTP 403 FORBIDDEN.
     """
 
     def permission_checker(user: UserContext = Depends(get_current_user)) -> str:
         # Kiểm tra nguyên tắc tách biệt dữ liệu: Admin không được đọc hoặc ghi dữ liệu nghiệp vụ kho
-        if user.role_code == "admin" and permission_code != "AD-1":
+        if user.role_code == "admin" and not any(p == "AD-1" for p in permission_codes):
+            codes_str = ", ".join(permission_codes)
             raise BusinessError(
                 code="FORBIDDEN",
                 message=(
                     f"Vai trò Quản trị viên (admin) bị chặn thực hiện "
-                    f"quyền nghiệp vụ `{permission_code}`"
+                    f"quyền nghiệp vụ `{codes_str}`"
                 ),
                 http_status=403,
-                details={"permission_code": permission_code, "role_code": user.role_code},
+                details={"permission_codes": list(permission_codes), "role_code": user.role_code},
             )
 
-        if permission_code not in user.permissions:
-            raise BusinessError(
-                code="FORBIDDEN",
-                message=f"Tài khoản không có quyền `{permission_code}` để thực hiện hành động này",
-                http_status=403,
-                details={"permission_code": permission_code, "role_code": user.role_code},
-            )
+        for p in permission_codes:
+            if p in user.permissions:
+                return user.permissions[p]
 
-        access_type = user.permissions[permission_code]
-        return access_type
+        codes_str = ", ".join(permission_codes)
+        raise BusinessError(
+            code="FORBIDDEN",
+            message=f"Tài khoản không có quyền `{codes_str}` để thực hiện hành động này",
+            http_status=403,
+            details={"permission_codes": list(permission_codes), "role_code": user.role_code},
+        )
 
     return permission_checker
 

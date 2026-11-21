@@ -8,9 +8,8 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
 
-from server.app.core.database import get_db
+from server.app.core.database import DbSession, get_db
 from server.app.core.exceptions import BusinessError
 from server.app.core.rbac import UserContext, get_current_user, require_permission
 from server.app.core.responses import success_response
@@ -26,7 +25,7 @@ def get_balances(
     lot_id: uuid.UUID | None = Query(None),
     user_ctx: UserContext = Depends(get_current_user),
     _perm: str = Depends(require_permission("QL-1.1")),
-    db: Session = Depends(get_db),
+    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Endpoint tra cứu tồn kho theo kho của user trong token.
 
@@ -58,7 +57,7 @@ def get_transactions(
     sku_id: uuid.UUID | None = Query(None),
     limit: int = Query(50, ge=1, le=100),
     user_ctx: UserContext = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Sổ cái giao dịch tồn kho (chỉ dành cho thukho, quanly)."""
     if user_ctx.role_code not in ("thukho", "quanly"):
@@ -84,7 +83,7 @@ def get_transactions(
 def get_lots(
     sku_id: uuid.UUID | None = Query(None),
     user_ctx: UserContext = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Danh sách lô hàng và hạn dùng (thukho, quanly)."""
     if user_ctx.role_code not in ("thukho", "quanly"):
@@ -97,7 +96,7 @@ def get_lots(
 @router.get("/pallets", summary="Danh sách Pallet")
 def get_pallets(
     user_ctx: UserContext = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Danh sách Pallet trong kho (thukho, quanly)."""
     if user_ctx.role_code not in ("thukho", "quanly"):
@@ -114,7 +113,7 @@ def get_pallets(
 def get_pallet_detail(
     pallet_id: uuid.UUID,
     user_ctx: UserContext = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Chi tiết một Pallet (thukho, quanly)."""
     if user_ctx.role_code not in ("thukho", "quanly"):
@@ -138,7 +137,7 @@ def get_pallet_detail(
 def get_location_stock(
     location_id: uuid.UUID,
     user_ctx: UserContext = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Tra cứu hàng đang có tại một vị trí (thukho, quanly)."""
     if user_ctx.role_code not in ("thukho", "quanly"):
