@@ -7,7 +7,7 @@ ABEST WMS (Warehouse Management System) là hệ thống quản lý kho được
 ## 1. Yêu cầu hệ thống
 - **Hệ điều hành:** Linux, macOS, hoặc Windows
 - **Python:** Phiên bản 3.11 trở lên (khuyến nghị 3.12)
-- **Docker & Docker Desktop:** Để chạy CSDL PostgreSQL
+- **Docker & Docker Desktop:** Để chạy CSDL PostgreSQL 16
 - **Git** và **GitHub CLI (`gh`)**
 
 ---
@@ -51,9 +51,17 @@ cp .env.example .env
 
 ## 3. Khởi chạy CSDL và Hệ thống
 
-### 3.1. Chạy CSDL PostgreSQL (Docker)
+### 3.1. Chạy CSDL PostgreSQL (Docker Compose)
 ```bash
-docker-compose up -d
+docker compose up -d
+
+# Nạp schema, patch và dữ liệu mẫu:
+make db-reset
+# (hoặc: bash scripts/reset_db.sh)
+
+# Chạy bài kiểm thử CSDL:
+make db-test
+# (hoặc: bash scripts/run_db_tests.sh)
 ```
 
 ### 3.2. Chạy Server Backend (FastAPI API)
@@ -79,7 +87,25 @@ uvicorn client.app.main:app --host 0.0.0.0 --port 3000 --reload
 
 ---
 
-## 4. Chạy kiểm thử và Kiểm tra chất lượng mã nguồn
+## 4. Tài khoản người dùng Demo (Mục 5 Đặc tả)
+
+Toàn bộ 9 tài khoản demo sử dụng mật khẩu mặc định: **`Demo@123456`**
+
+| Username | Vai trò (`role_code`) | Họ và tên | Khâu làm việc (`primary_stage`) | Kênh truy cập |
+| :--- | :--- | :--- | :--- | :--- |
+| `nv_nhan` | `nv-nhan` | Trần Văn Nhận | `NHAN_HANG` | Mobile |
+| `nv_cat` | `nv-cat` | Lê Văn Cất | `CAT_HANG` | Mobile |
+| `nv_soan` | `nv-soan` | Phạm Văn Soạn | `SOAN_HANG` | Mobile |
+| `nv_dongoi` | `nv-dongoi` | Hoàng Thị Gói | `DONG_GOI_XUAT` | Mobile |
+| `nv_kiemke` | `nv-kiemke` | Võ Văn Kê | `KIEM_KE` | Mobile |
+| `thukho` | `thukho` | Đỗ Thủ Kho | `QUAN_LY_CHUNG` | Mobile + Web |
+| `quanly` | `quanly` | Nguyễn Văn Quản Lý | `QUAN_LY_CHUNG` | Mobile + Web |
+| `bgd` | `bgd` | Phan Giám Đốc | `QUAN_LY_CHUNG` | Web |
+| `admin` | `admin` | Quản Trị Viên Hệ Thống | `QUAN_LY_CHUNG` | Web |
+
+---
+
+## 5. Chạy kiểm thử và Kiểm tra chất lượng mã nguồn
 
 ```bash
 # Kiểm tra định dạng (Black & Ruff)
@@ -97,7 +123,7 @@ make ci
 
 ---
 
-## 5. Quy ước và Tài liệu tham chiếu
+## 6. Quy ước và Tài liệu tham chiếu
 
 Tất cả các thành viên tham gia phát triển dự án bắt buộc phải đọc và tuân thủ các tài liệu đặc tả:
 - **Đặc tả dự án:** [docs/spec/dac-ta-du-an.md](docs/spec/dac-ta-du-an.md) (Kiến trúc, cấu trúc thư mục, quy cách đặt tên, phân quyền RBAC và kịch bản demo).

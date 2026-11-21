@@ -9,6 +9,7 @@ ifeq ($(OS),Windows_NT)
     MYPY = $(VENV_BIN)/mypy.exe
     PYTEST = $(VENV_BIN)/pytest.exe
     UVICORN = $(VENV_BIN)/uvicorn.exe
+    BASH = bash
 else
     VENV_BIN = .venv/bin
     PYTHON = $(VENV_BIN)/python
@@ -18,14 +19,16 @@ else
     MYPY = $(VENV_BIN)/mypy
     PYTEST = $(VENV_BIN)/pytest
     UVICORN = $(VENV_BIN)/uvicorn
+    BASH = bash
 endif
 
-.PHONY: help install db-reset lint typecheck test ci run-server run-client
+.PHONY: help install db-reset db-test lint typecheck test ci run-server run-client
 
 help:
 	@echo "Danh sach cac lenh ho tro:"
 	@echo "  make install      - Tao moi truong ao va cai dat thu vien"
-	@echo "  make db-reset     - Reset va seed CSDL (se hoan thien o AG2)"
+	@echo "  make db-reset     - Reset va seed CSDL (chay scripts/reset_db.sh)"
+	@echo "  make db-test      - Chay kiem thu CSDL (chay scripts/run_db_tests.sh)"
 	@echo "  make lint         - Kiem tra dinh dang ma nguon (Black & Ruff)"
 	@echo "  make typecheck    - Kiem tra kieu tinh voi MyPy"
 	@echo "  make test         - Chay cac bai kiem thu Pytest"
@@ -40,7 +43,10 @@ install:
 	$(PIP) install -r client/requirements.txt
 
 db-reset:
-	@echo "db-reset: Script khoi tao CSDL se duoc cung cap trong buoc AG2."
+	$(BASH) scripts/reset_db.sh
+
+db-test:
+	$(BASH) scripts/run_db_tests.sh
 
 lint:
 	$(BLACK) --check .
