@@ -1,7 +1,7 @@
 # Báo cáo nghiệm thu U5: Bước AG8 (CI và Kiểm thử tự động)
 
 **Mã nghiệm thu:** `u5-ag8-ci`  
-**PR liên quan:** PR bước AG8 (`chore/ag8-ci` -> `develop`)  
+**PR liên quan:** [#8 - feat(ci): configure github actions ci workflow and update make ci (ag8)](https://github.com/binhdoan0201/abest-wms/pull/8)  
 **Nhánh kiểm tra:** `chore/ag8-ci`  
 **Người thực hiện nghiệm thu:** Antigravity Independent Auditor (U5)  
 **Ngày nghiệm thu:** 2026-11-21  
