@@ -1,5 +1,7 @@
 # ABEST WMS - Hệ thống Quản lý Kho Hàng
 
+[![CI Pipeline](https://github.com/binhdoan0201/abest-wms/actions/workflows/ci.yml/badge.svg)](https://github.com/binhdoan0201/abest-wms/actions/workflows/ci.yml)
+
 ABEST WMS (Warehouse Management System) là hệ thống quản lý kho được xây dựng trên kiến trúc Client–Server kết hợp MVC, đáp ứng các tiêu chuẩn nghiệp vụ kho bãi hiện đại (Inbound, Outbound, Tồn kho đa vị trí, Phân quyền RBAC, Quản lý công việc và Luồng phê duyệt đa cấp).
 
 ---
@@ -105,21 +107,45 @@ Toàn bộ 9 tài khoản demo sử dụng mật khẩu mặc định: **`Demo@1
 
 ---
 
-## 5. Chạy kiểm thử và Kiểm tra chất lượng mã nguồn
+## 5. Chạy kiểm thử và Tích hợp liên tục (CI)
 
+### 5.1. Chạy CI tại môi trường cục bộ (Local CI)
+Lệnh `make ci` (hoặc `.\make.bat ci` trên Windows) thực thi trọn vẹn chuỗi kiểm tra tiêu chuẩn trước khi tạo Pull Request:
 ```bash
-# Kiểm tra định dạng (Black & Ruff)
-make lint
-
-# Kiểm tra kiểu tĩnh (MyPy)
-make typecheck
-
-# Chạy toàn bộ bài kiểm thử (Pytest)
-make test
-
-# Chạy trọn gói kiểm tra CI (Lint + Typecheck + Test)
+# Chạy trọn gói kiểm tra CI cục bộ (Lint + Typecheck + DB Tests + Pytest)
 make ci
 ```
+Quy trình thực hiện tuần tự:
+1. `make lint`: Kiểm tra định dạng chuẩn với Black và Ruff (`black --check .`, `ruff check .`).
+2. `make typecheck`: Kiểm tra kiểu tĩnh với MyPy (`mypy server client scripts`).
+3. `make db-test`: Kiểm thử CSDL với script `scripts/run_db_tests.sh` (CSDL tạm, smoke test, idempotent patch lần 2, test seed).
+4. `make test`: Chạy toàn bộ 63 bài kiểm thử tự động với Pytest (kiểm thử đơn vị, kiểm thử tích hợp, kiểm thử kiến trúc AST).
+
+Bạn cũng có thể chạy riêng lẻ từng bước:
+```bash
+make lint       # Định dạng mã nguồn
+make typecheck  # Kiểu tĩnh MyPy
+make db-test    # Kiểm thử CSDL
+make test       # Kiểm thử Pytest (server/tests)
+```
+
+### 5.2. Pipeline Tích hợp liên tục trên GitHub Actions
+Pipeline CI được thiết lập tại [.github/workflows/ci.yml](.github/workflows/ci.yml) và tự động kích hoạt mỗi khi:
+- Có Pull Request mở vào nhánh `develop` hoặc `main`.
+- Có commit mới được đẩy (push) lên nhánh `develop` hoặc `main`.
+
+**Các bước thực thi trên GitHub Actions:**
+1. Khởi tạo service container **PostgreSQL 16**.
+2. Kiểm tra định dạng (Black) và lint mã nguồn (Ruff).
+3. Kiểm tra kiểu tĩnh (MyPy).
+4. Khởi tạo, nạp schema và seed dữ liệu CSDL (`scripts/reset_db.sh`).
+5. Chạy toàn bộ các bài kiểm thử CSDL (`scripts/run_db_tests.sh`).
+6. Chạy bộ kiểm thử tự động toàn diện Pytest (unit, integration, AST layering, OpenAPI contract, table coverage).
+
+**Cách xem kết quả CI trên GitHub:**
+1. Truy cập tab **Actions** tại kho lưu trữ GitHub: `https://github.com/binhdoan0201/abest-wms/actions`.
+2. Chọn workflow run tương ứng với nhánh hoặc Pull Request cần theo dõi.
+3. Khi tất cả các bước hiển thị dấu tích xanh (green checkmark), Pull Request đủ điều kiện để được xem xét nghiệm thu và merge.
 
 ---
 
