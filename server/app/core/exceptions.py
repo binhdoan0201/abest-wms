@@ -78,12 +78,20 @@ def translate_db_error(exc: Exception) -> BusinessError:
             details={"db_message": "SOD_VIOLATION"},
         )
 
-    if "qty_available" in error_str:
+    if "qty_available" in error_str or "TON_KHO_KHONG_TON_TAI" in error_str:
         return BusinessError(
             code="INVENTORY_INSUFFICIENT_QTY",
             message="Số lượng tồn khả dụng không đủ để thực hiện giao dịch",
             http_status=409,
             details={"db_message": "INVENTORY_INSUFFICIENT_QTY"},
+        )
+
+    if "XUNG_DOT_PHIEN_BAN" in error_str:
+        return BusinessError(
+            code="VERSION_CONFLICT",
+            message="Dữ liệu đã bị cập nhật bởi thao tác khác (xung đột phiên bản)",
+            http_status=409,
+            details={"db_message": "VERSION_CONFLICT"},
         )
 
     return BusinessError(
