@@ -9,7 +9,7 @@ ifeq ($(OS),Windows_NT)
     MYPY = $(VENV_BIN)/mypy.exe
     PYTEST = $(VENV_BIN)/pytest.exe
     UVICORN = $(VENV_BIN)/uvicorn.exe
-    BASH = bash
+    BASH = "C:/Program Files/Git/bin/bash.exe"
 else
     VENV_BIN = .venv/bin
     PYTHON = $(VENV_BIN)/python
@@ -32,7 +32,7 @@ help:
 	@echo "  make lint         - Kiem tra dinh dang ma nguon (Black & Ruff)"
 	@echo "  make typecheck    - Kiem tra kieu tinh voi MyPy"
 	@echo "  make test         - Chay cac bai kiem thu Pytest"
-	@echo "  make ci           - Chay toan bo kiem tra CI (lint + typecheck + test)"
+	@echo "  make ci           - Chay toan bo kiem tra CI (lint + typecheck + db-test + test)"
 	@echo "  make run-server   - Khoi chay FastAPI server backend"
 	@echo "  make run-client   - Khoi chay FastAPI client web"
 
@@ -58,7 +58,7 @@ typecheck:
 test:
 	$(PYTEST) server/tests
 
-ci: lint typecheck test
+ci: lint typecheck db-test test
 
 run-server:
 	$(UVICORN) server.app.main:app --host 0.0.0.0 --port 8000 --reload
