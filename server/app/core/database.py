@@ -22,6 +22,9 @@ SessionLocal = sessionmaker(
     expire_on_commit=False,
 )
 
+# Alias Session type for routers to import from core instead of sqlalchemy
+DbSession = Session
+
 
 class Base(DeclarativeBase):
     """Lớp cơ sở cho các ORM models."""

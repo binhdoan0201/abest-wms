@@ -2,9 +2,10 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from server.app.core.database import Base
@@ -111,3 +112,29 @@ class User(Base):
     )
 
     role: Mapped["Role"] = relationship("Role", back_populates="users")
+
+
+class AuditLog(Base):
+    """Mô hình ORM bảng `audit_logs` (nhật ký kiểm toán bất biến)."""
+
+    __tablename__ = "audit_logs"
+
+    audit_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    warehouse_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    delegated_from_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True
+    )
+    action_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    old_values: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    new_values: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    reauth_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
