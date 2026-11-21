@@ -1,7 +1,7 @@
 # Báo cáo nghiệm thu U5: Bước AG7 (Khung 8 module - ag7-module-scaffold)
 
 **Mã nghiệm thu:** `u5-ag7-module-scaffold`  
-**PR liên quan:** PR bước AG7 (`chore/ag7-module-scaffold` -> `develop`)  
+**PR liên quan:** [#7 - feat(scaffold): scaffold 8 modules, orm models, api contracts, and layering tests (ag7)](https://github.com/binhdoan0201/abest-wms/pull/7)  
 **Nhánh kiểm tra:** `chore/ag7-module-scaffold`  
 **Người thực hiện nghiệm thu:** Antigravity Independent Auditor (U5)  
 **Ngày nghiệm thu:** 2026-11-21  
