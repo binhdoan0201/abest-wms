@@ -1,0 +1,30 @@
+{% extends "_base/layout.html" %}
+
+{% block title %}Thông Báo Lỗi | ABEST WMS{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto my-8 bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200 text-center">
+    <div class="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">
+        ⚠️
+    </div>
+    <h1 class="text-xl sm:text-2xl font-bold text-slate-800 mb-2">Đã Có Lỗi Xảy Ra</h1>
+    <p class="text-sm text-slate-600 mb-6">
+        {{ error_msg or "Hệ thống gặp sự cố trong quá trình xử lý yêu cầu của bạn." }}
+    </p>
+
+    {% if error_code %}
+    <div class="bg-slate-50 border border-slate-200 rounded-lg p-2.5 mb-6 text-xs text-slate-500 font-mono">
+        Mã lỗi: <span class="font-bold text-slate-700">{{ error_code }}</span>
+    </div>
+    {% endif %}
+
+    <div class="flex flex-col gap-2">
+        <a href="/" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 px-4 rounded-xl transition text-sm flex items-center justify-center">
+            Về Trang Chủ
+        </a>
+        <a href="javascript:history.back()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2.5 px-4 rounded-xl transition text-sm flex items-center justify-center">
+            Thử Lại
+        </a>
+    </div>
+</div>
+{% endblock %}
