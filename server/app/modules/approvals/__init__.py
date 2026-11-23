@@ -1,6 +1,15 @@
-"""ABEST WMS - Module Phê duyệt (Approvals)."""
+"""ABEST WMS - Module Phê duyệt (Approvals).
 
-from server.app.modules.approvals.routers import router
-from server.app.modules.approvals.services import ApprovalsService
+Export các hàm công khai để module khác (inbound, cycle_count) gọi tạo yêu cầu duyệt
+và đề xuất điều chỉnh tồn kho.
+"""
 
-__all__ = ["ApprovalsService", "router"]
+from server.app.modules.approvals.services import (
+    create_approval_request,
+    propose_stock_adjustment,
+)
+
+__all__ = [
+    "create_approval_request",
+    "propose_stock_adjustment",
+]
