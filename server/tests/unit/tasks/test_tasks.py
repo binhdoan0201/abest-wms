@@ -208,8 +208,8 @@ def test_assign_inactive_or_unsafe_seasonal_user_rejected(db_session: Session) -
     # 2. Khôi phục ACTIVE nhưng đặt thi vụ chưa kiểm tra an toàn
     db_session.execute(
         text(
-            "UPDATE users SET status = 'ACTIVE', is_seasonal = TRUE, valid_until = NOW() +
-            INTERVAL '7 days', is_safety_checked = FALSE "
+            "UPDATE users SET status = 'ACTIVE', is_seasonal = TRUE, valid_until = NOW() + "
+            "INTERVAL '7 days', is_safety_checked = FALSE "
             "WHERE user_id = :u"
         ),
         {"u": nv_cat_id},
