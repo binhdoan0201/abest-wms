@@ -145,16 +145,19 @@ Không có endpoint ghi tồn công khai: mọi thay đổi tồn đi qua `apply
 
 ### 4.8 `approvals` (D)
 
-Yêu cầu duyệt chỉ được tạo từ service của module khác, không mở endpoint tạo cho client.
+Yêu cầu duyệt chênh lệch (`GRN_DISCREPANCY`, `CYCLE_COUNT_DIFF`) được tạo từ service của module khác; riêng đề xuất điều chỉnh tồn / hủy hàng (`TK-4.3`) do Thủ kho tạo qua endpoint riêng bên dưới.
 
 | Method | Đường dẫn | Mục đích | Vai trò |
 | --- | --- | --- | --- |
 | GET | `/approvals` | Hàng chờ (`?status=&tier=&object_type=&expired=true`) | `thukho` (D1), `quanly` (D2), `bgd` (D3) |
-| GET | `/approvals/{id}` | Chi tiết và lịch sử | như trên |
-| POST | `/approvals/{id}/approve` | Duyệt; gửi `reauth_method` nếu giá trị từ ngưỡng xác thực lại | đúng cấp của yêu cầu |
+| GET | `/approvals/{id}` | Chi tiết, lịch sử và khóa xem đúng tầng (`?lock=true`, timeout 15 phút) | như trên |
+| POST | `/approvals/{id}/unlock` | Nhả khóa xem hồ sơ chủ động | người giữ khóa |
+| POST | `/approvals/stock-adjustments` | Đề xuất điều chỉnh tồn hoặc hủy hàng | `thukho` |
+| POST | `/approvals/{id}/approve` | Duyệt chốt ở tầng hiện tại; gửi `reauth_method` + `reauth_password` nếu từ ngưỡng xác thực lại | đúng cấp của yêu cầu |
+| POST | `/approvals/{id}/escalate` | Thủ kho chuyển tiếp hồ sơ lên Quản lý kho (D2) | `thukho` |
 | POST | `/approvals/{id}/reject` | Từ chối kèm lý do | đúng cấp của yêu cầu |
-| POST | `/approvals/{id}/request-info` | Trả về người lập xin thêm thông tin | đúng cấp của yêu cầu |
-| POST | `/approvals/escalate-expired` | Chạy leo thang SLA (gọi `fn_escalate_expired_approvals`) | `quanly` |
+| POST | `/approvals/{id}/request-info` | Trả về người lập xin thêm thông tin hoặc đếm lại | đúng cấp của yêu cầu |
+| POST | `/approvals/escalate-expired` | Chạy leo thang SLA toàn hệ thống (gọi `fn_escalate_expired_approvals`) | `quanly` |
 
 ### 4.9 `cycle_count` (D)
 

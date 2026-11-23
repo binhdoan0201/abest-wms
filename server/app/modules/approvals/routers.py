@@ -1,16 +1,12 @@
-"""ABEST WMS - Routers cho Phân hệ Phê duyệt (Approvals).
-
-Chỉ nhận request, kiểm quyền RBAC và ủy quyền cho services.
-"""
+"""ABEST WMS - API Routers cho Phân hệ Phê duyệt (Approvals)."""
 
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from server.app.core.database import DbSession, get_db
-from server.app.core.rbac import UserContext, get_current_user, require_permission
-from server.app.core.responses import success_response
+from server.app.core.database import get_db
+from server.app.core.rbac import UserContext, get_current_user
 from server.app.modules.approvals import services
 from server.app.modules.approvals.schemas import (
     ApprovalDetailResponse,
@@ -18,6 +14,7 @@ from server.app.modules.approvals.schemas import (
     ApprovalResponse,
     ApproveDecisionRequest,
     EscalateExpiredResponse,
+    EscalateTierRequest,
     RejectDecisionRequest,
     RequestInfoDecisionRequest,
     StockAdjustmentProposalCreate,
@@ -26,17 +23,49 @@ from server.app.modules.approvals.schemas import (
 router = APIRouter(prefix="/approvals", tags=["Approvals"])
 
 
-@router.get("", summary="Xem hàng chờ duyệt hồ sơ chênh lệch")
-def get_approvals(
-    status: str | None = Query(None),
-    tier: str | None = Query(None),
-    object_type: str | None = Query(None),
-    expired: bool | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+def _to_approval_response(item: Any) -> ApprovalResponse:
+    return ApprovalResponse(
+        approval_id=item.approval_id,
+        warehouse_id=item.warehouse_id,
+        object_type=str(item.object_type),
+        object_id=item.object_id,
+        proposer_user_id=item.proposer_user_id,
+        current_tier=str(item.current_tier),
+        status=str(item.status),
+        execution_status=str(item.execution_status),
+        discrepancy_value_amount=item.discrepancy_value_amount,
+        sla_due_at=item.sla_due_at,
+        locked_by_viewer_id=item.locked_by_viewer_id,
+        locked_at=item.locked_at,
+        final_decided_by=item.final_decided_by,
+        final_decided_at=item.final_decided_at,
+        version_no=item.version_no,
+        created_at=item.created_at,
+    )
+
+
+def _to_history_response(item: Any) -> ApprovalHistoryItem:
+    return ApprovalHistoryItem(
+        history_id=item.history_id,
+        tier=str(item.tier),
+        actor_user_id=item.actor_user_id,
+        action=item.action,
+        recommendation_or_reason=item.recommendation_or_reason,
+        reauth_method=item.reauth_method,
+        created_at=item.created_at,
+    )
+
+
+@router.get("")
+def list_approvals(
+    status: str | None = Query(default=None),
+    tier: str | None = Query(default=None),
+    object_type: str | None = Query(default=None),
+    expired: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Any = Depends(get_db),
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("TK-3.2")),
-    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     items, total = services.list_approvals_queue(
         db=db,
@@ -48,22 +77,22 @@ def get_approvals(
         page=page,
         page_size=page_size,
     )
-    data = [ApprovalResponse.model_validate(item).model_dump(mode="json") for item in items]
-    return success_response(
-        data=data,
-        page=page,
-        page_size=page_size,
-        total=total,
-    )
+    return {
+        "data": [_to_approval_response(i).model_dump(mode="json") for i in items],
+        "meta": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+        },
+    }
 
 
-@router.get("/{approval_id}", summary="Xem chi tiết hồ sơ và lịch sử duyệt")
-def get_approval_by_id(
+@router.get("/{approval_id}")
+def get_approval_detail(
     approval_id: uuid.UUID,
-    lock: bool = Query(True, description="Khóa hồ sơ khi mở xem chi tiết"),
+    lock: bool = Query(default=True),
+    db: Any = Depends(get_db),
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("TK-3.2")),
-    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     approval, histories = services.get_approval_detail(
         db=db,
@@ -71,30 +100,50 @@ def get_approval_by_id(
         approval_id=approval_id,
         acquire_lock=lock,
     )
-    detail = ApprovalDetailResponse.model_validate(approval)
-    detail.histories = [ApprovalHistoryItem.model_validate(h) for h in histories]
-    return success_response(data=detail.model_dump(mode="json"))
+    db.commit()
+    detail = ApprovalDetailResponse(
+        **_to_approval_response(approval).model_dump(),
+        histories=[_to_history_response(h) for h in histories],
+    )
+    return {"data": detail.model_dump(mode="json")}
 
 
-@router.post("/stock-adjustments", status_code=201, summary="Đề xuất điều chỉnh tồn hoặc hủy hàng")
-def create_stock_adjustment_proposal(
-    req: StockAdjustmentProposalCreate,
+@router.post("/{approval_id}/unlock")
+def unlock_approval(
+    approval_id: uuid.UUID,
+    db: Any = Depends(get_db),
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("TK-4.3")),
-    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    approval = services.propose_stock_adjustment(db=db, user_ctx=user_ctx, req=req)
-    data = ApprovalResponse.model_validate(approval).model_dump(mode="json")
-    return success_response(data=data)
+    approval = services.unlock_approval(
+        db=db,
+        user_ctx=user_ctx,
+        approval_id=approval_id,
+    )
+    db.commit()
+    return {"data": _to_approval_response(approval).model_dump(mode="json")}
 
 
-@router.post("/{approval_id}/approve", summary="Phê duyệt hồ sơ chênh lệch")
+@router.post("/stock-adjustments", status_code=201)
+def propose_stock_adjustment(
+    req: StockAdjustmentProposalCreate,
+    db: Any = Depends(get_db),
+    user_ctx: UserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    approval = services.propose_stock_adjustment(
+        db=db,
+        user_ctx=user_ctx,
+        req=req,
+    )
+    db.commit()
+    return {"data": _to_approval_response(approval).model_dump(mode="json")}
+
+
+@router.post("/{approval_id}/approve")
 def approve_request(
     approval_id: uuid.UUID,
     req: ApproveDecisionRequest,
+    db: Any = Depends(get_db),
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("TK-3.2")),
-    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     approval = services.approve_request(
         db=db,
@@ -102,17 +151,33 @@ def approve_request(
         approval_id=approval_id,
         req=req,
     )
-    data = ApprovalResponse.model_validate(approval).model_dump(mode="json")
-    return success_response(data=data)
+    db.commit()
+    return {"data": _to_approval_response(approval).model_dump(mode="json")}
 
 
-@router.post("/{approval_id}/reject", summary="Từ chối hồ sơ chênh lệch kèm lý do")
+@router.post("/{approval_id}/escalate")
+def escalate_to_next_tier(
+    approval_id: uuid.UUID,
+    req: EscalateTierRequest,
+    db: Any = Depends(get_db),
+    user_ctx: UserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    approval = services.escalate_to_next_tier(
+        db=db,
+        user_ctx=user_ctx,
+        approval_id=approval_id,
+        req=req,
+    )
+    db.commit()
+    return {"data": _to_approval_response(approval).model_dump(mode="json")}
+
+
+@router.post("/{approval_id}/reject")
 def reject_request(
     approval_id: uuid.UUID,
     req: RejectDecisionRequest,
+    db: Any = Depends(get_db),
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("TK-3.2")),
-    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     approval = services.reject_request(
         db=db,
@@ -120,17 +185,16 @@ def reject_request(
         approval_id=approval_id,
         req=req,
     )
-    data = ApprovalResponse.model_validate(approval).model_dump(mode="json")
-    return success_response(data=data)
+    db.commit()
+    return {"data": _to_approval_response(approval).model_dump(mode="json")}
 
 
-@router.post("/{approval_id}/request-info", summary="Yêu cầu bổ sung thêm thông tin")
-def request_info(
+@router.post("/{approval_id}/request-info")
+def request_more_info(
     approval_id: uuid.UUID,
     req: RequestInfoDecisionRequest,
+    db: Any = Depends(get_db),
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("TK-3.2")),
-    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     approval = services.request_more_info(
         db=db,
@@ -138,16 +202,16 @@ def request_info(
         approval_id=approval_id,
         req=req,
     )
-    data = ApprovalResponse.model_validate(approval).model_dump(mode="json")
-    return success_response(data=data)
+    db.commit()
+    return {"data": _to_approval_response(approval).model_dump(mode="json")}
 
 
-@router.post("/escalate-expired", summary="Chạy tự động leo thang SLA hồ sơ quá hạn")
+@router.post("/escalate-expired")
 def escalate_expired(
+    db: Any = Depends(get_db),
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("QL-5.3")),
-    db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     count = services.escalate_expired_requests(db=db, user_ctx=user_ctx)
-    data = EscalateExpiredResponse(escalated_count=count).model_dump(mode="json")
-    return success_response(data=data)
+    db.commit()
+    res = EscalateExpiredResponse(escalated_count=count)
+    return {"data": res.model_dump(mode="json")}
