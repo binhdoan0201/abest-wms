@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from server.app.modules.tasks.models import Task
@@ -55,3 +55,28 @@ class TaskRepository:
             Task.status.in_(["ASSIGNED", "IN_PROGRESS"]),
         )
         return int(db.execute(stmt).scalar() or 0)
+
+    @staticmethod
+    def get_max_open_tasks(db: Session, warehouse_id: uuid.UUID) -> int:
+        """Đọc giới hạn task mở của mỗi nhân viên theo cấu hình kho (mặc định 3).
+
+        Truy vấn chỉ đọc bảng `warehouse_configs` của module master_data.
+        """
+        row = db.execute(
+            text("SELECT max_open_tasks_per_user FROM warehouse_configs WHERE warehouse_id = :w"),
+            {"w": warehouse_id},
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else 3
+
+    @staticmethod
+    def lock_user_and_get_stage(db: Session, user_id: uuid.UUID) -> str | None:
+        """Khóa dòng nhân viên (chống giao đồng thời) và trả về khâu làm việc `primary_stage`.
+
+        Truy vấn chỉ đọc bảng `users` của module auth; khóa dòng để hai lệnh giao
+        đồng thời cho cùng một nhân viên được thực hiện tuần tự.
+        """
+        row = db.execute(
+            text("SELECT primary_stage::text FROM users WHERE user_id = :u FOR UPDATE"),
+            {"u": user_id},
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None

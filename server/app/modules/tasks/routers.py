@@ -27,6 +27,7 @@ from server.app.modules.tasks.schemas import (
     CancelTaskRequest,
     CompleteTaskRequest,
     CreateTaskRequest,
+    ReassignTaskRequest,
     RejectTaskRequest,
 )
 from server.app.modules.tasks.services import TaskService
@@ -193,7 +194,7 @@ def complete_task_endpoint(
 @router.post("/{task_id}/reassign", summary="Điều chuyển nhiệm vụ sang nhân viên/khu vực khác")
 def reassign_task_endpoint(
     task_id: uuid.UUID,
-    req: AssignTaskRequest,
+    req: ReassignTaskRequest,
     user_ctx: UserContext = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:

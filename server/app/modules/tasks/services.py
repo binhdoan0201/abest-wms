@@ -2,7 +2,7 @@
 
 Triển khai đầy đủ các nghiệp vụ:
 - create_task
-- assign_task (kiểm tra giới hạn tối đa 3 task mở/nhân viên)
+- assign_task (kiểm tra khâu làm việc và giới hạn task mở theo cấu hình kho)
 - accept_task
 - reject_task
 - complete_task
@@ -28,11 +28,10 @@ from server.app.modules.tasks.schemas import (
     CancelTaskRequest,
     CompleteTaskRequest,
     CreateTaskRequest,
+    ReassignTaskRequest,
     RejectTaskRequest,
     TaskResponse,
 )
-
-MAX_OPEN_TASKS_PER_USER = 3
 
 
 def _task_to_schema(t: Task) -> TaskResponse:
@@ -57,6 +56,31 @@ def _task_to_schema(t: Task) -> TaskResponse:
         completed_at=t.completed_at,
         created_at=t.created_at,
     )
+
+
+def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
+    """Kiểm tra người nhận việc: tồn tại, đúng khâu làm việc và chưa vượt giới hạn task mở.
+
+    Khóa dòng nhân viên trước khi đếm để hai lệnh giao đồng thời không vượt giới hạn.
+    """
+    stage = TaskRepository.lock_user_and_get_stage(db, user_id)
+    if stage is None:
+        raise BusinessError(
+            code="NOT_FOUND", message="Không tìm thấy nhân viên được giao", http_status=404
+        )
+    if stage != task.stage:
+        raise BusinessError(
+            code="TASKS_STAGE_MISMATCH",
+            message="Nhân viên không thuộc khâu làm việc của nhiệm vụ này",
+            http_status=409,
+        )
+    limit = TaskRepository.get_max_open_tasks(db, task.warehouse_id)
+    if TaskRepository.count_open_tasks_for_user(db, user_id, task.warehouse_id) >= limit:
+        raise BusinessError(
+            code="TASKS_MAX_OPEN_EXCEEDED",
+            message=f"Nhân viên đang giữ tối đa {limit} nhiệm vụ mở",
+            http_status=409,
+        )
 
 
 class TaskService:
@@ -127,17 +151,9 @@ class TaskService:
                 http_status=409,
             )
 
-        open_count = TaskRepository.count_open_tasks_for_user(
-            db, req.assigned_to, task.warehouse_id
-        )
-        if open_count >= MAX_OPEN_TASKS_PER_USER:
-            raise BusinessError(
-                code="TASKS_MAX_OPEN_EXCEEDED",
-                message=f"Nhân viên đang giữ tối đa {MAX_OPEN_TASKS_PER_USER} nhiệm vụ mở",
-                http_status=409,
-            )
+        _check_assignee(db, task, req.assigned_to_user_id)
 
-        task.assigned_to = req.assigned_to
+        task.assigned_to = req.assigned_to_user_id
         task.assigned_by = assigner_id
         task.status = "ASSIGNED"
         task.rejection_reason = None
@@ -151,7 +167,7 @@ class TaskService:
             actor_user_id=assigner_id,
             warehouse_id=task.warehouse_id,
             entity_id=task.task_id,
-            new_values={"assigned_to": str(req.assigned_to), "status": "ASSIGNED"},
+            new_values={"assigned_to": str(req.assigned_to_user_id), "status": "ASSIGNED"},
         )
         return _task_to_schema(task)
 
@@ -328,7 +344,7 @@ class TaskService:
         db: Session,
         task_id: uuid.UUID,
         assigner_id: uuid.UUID,
-        req: AssignTaskRequest,
+        req: ReassignTaskRequest,
     ) -> TaskResponse:
         """Điều chuyển nhiệm vụ sang nhân viên khác."""
         task = TaskRepository.get_task_by_id(db, task_id, for_update=True)
@@ -352,20 +368,20 @@ class TaskService:
                 http_status=409,
             )
 
-        open_count = TaskRepository.count_open_tasks_for_user(
-            db, req.assigned_to, task.warehouse_id
-        )
-        if open_count >= MAX_OPEN_TASKS_PER_USER:
+        if task.assigned_to == req.new_assigned_to_user_id:
             raise BusinessError(
-                code="TASKS_MAX_OPEN_EXCEEDED",
-                message=f"Nhân viên nhận việc đã đạt tối đa {MAX_OPEN_TASKS_PER_USER} nhiệm vụ mở",
+                code="INVALID_STATE",
+                message="Nhiệm vụ đang do chính nhân viên này giữ",
                 http_status=409,
             )
 
+        _check_assignee(db, task, req.new_assigned_to_user_id)
+
         old_assignee = str(task.assigned_to) if task.assigned_to else None
-        task.assigned_to = req.assigned_to
+        task.assigned_to = req.new_assigned_to_user_id
         task.assigned_by = assigner_id
         task.status = "ASSIGNED"
+        task.started_at = None
         task.rejection_reason = None
         task.version_no += 1
         db.flush()
@@ -378,7 +394,11 @@ class TaskService:
             warehouse_id=task.warehouse_id,
             entity_id=task.task_id,
             old_values={"assigned_to": old_assignee},
-            new_values={"assigned_to": str(req.assigned_to), "status": "ASSIGNED"},
+            new_values={
+                "assigned_to": str(req.new_assigned_to_user_id),
+                "status": "ASSIGNED",
+                "reason": req.reason,
+            },
         )
         return _task_to_schema(task)
 
@@ -412,8 +432,6 @@ class TaskService:
             )
 
         task.status = "CANCELLED"
-        if req.reason:
-            task.rejection_reason = req.reason
         task.version_no += 1
         db.flush()
 
@@ -424,7 +442,7 @@ class TaskService:
             actor_user_id=actor_id,
             warehouse_id=task.warehouse_id,
             entity_id=task.task_id,
-            new_values={"status": "CANCELLED", "reason": req.reason},
+            new_values={"status": "CANCELLED", "reason": req.cancel_reason},
         )
         return _task_to_schema(task)
 
