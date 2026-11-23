@@ -1,11 +1,11 @@
-﻿"""ABEST WMS - Táº§ng Nghiá»‡p vá»¥ (Service) cho PhÃ¢n há»‡ Nhiá»‡m vá»¥ (Tasks).
+"""ABEST WMS - Tầng Nghiệp vụ (Service) cho Phân hệ Nhiệm vụ (Tasks).
 
-Triá»ƒn khai Ä‘áº§y Ä‘á»§ cÃ¡c nghiá»‡p vá»¥ D-01, D-02:
-- create_task (tá»± tÃ­nh `sla_due_at` theo cáº¥u hÃ¬nh `warehouse_configs.task_sla_minutes`)
-- assign_task (kiá»ƒm tra pháº¡m vi kho, Ä‘iá»u kiá»‡n nhÃ¢n viÃªn, khÃ¢u lÃ m viá»‡c vÃ  giá»›i háº¡n task má»Ÿ)
+Triển khai đầy đủ các nghiệp vụ D-01, D-02:
+- create_task (tự tính `sla_due_at` theo cấu hình `warehouse_configs.task_sla_minutes`)
+- assign_task (kiểm tra phạm vi kho, điu kiện nhân viên, khâu làm việc và giới hạn task mở)
 - accept_task / reject_task / complete_task
-- reassign_task (Ä‘iá»u chuyá»ƒn task sang nhÃ¢n viÃªn khÃ¡c, reset `started_at`)
-- cancel_task (há»§y task chÆ°a hoÃ n táº¥t)
+- reassign_task (điu chuyển task sang nhân viên khác, reset `started_at`)
+- cancel_task (hủy task chưa hoàn tất)
 """
 
 import uuid
@@ -61,36 +61,35 @@ def _get_task_in_warehouse(
     warehouse_id: uuid.UUID | None,
     for_update: bool = True,
 ) -> Task:
-    """Láº¥y nhiá»‡m vá»¥ vÃ  xÃ¡c thá»±c thuá»™c Ä‘Ãºng kho cá»§a ngÆ°á»i thao tÃ¡c (quy táº¯c 5.4.1)."""
+    """Lấy nhiệm vụ và xác thực thuộc đúng kho của ngưi thao tác (quy tắc 5.4.1)."""
     task = TaskRepository.get_task_by_id(db, task_id, for_update=for_update)
     if not task or not warehouse_id or task.warehouse_id != warehouse_id:
-        raise BusinessError(
-            code="NOT_FOUND", message="KhÃ´ng tÃ¬m tháº¥y nhiá»‡m vá»¥", http_status=404
-        )
+        raise BusinessError(code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404)
     return task
 
 
 def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
-    """Kiá»ƒm tra ngÆ°á»i nháº­n viá»‡c: tá»“n táº¡i, cÃ¹ng kho, ACTIVE, Ä‘Ãºng vai trÃ²/khÃ¢u, an toÃ n thá»i vá»¥ vÃ  giá»›i háº¡n task má»Ÿ."""
+    """Kiểm tra ngưi nhận việc: tồn tại, cùng kho, ACTIVE, đúng vai trò/khâu, an toàn thi vụ và
+    giới hạn task mở."""
     user_info = TaskRepository.lock_user_for_assignment(db, user_id)
     if user_info is None:
         raise BusinessError(
             code="NOT_FOUND",
-            message="KhÃ´ng tÃ¬m tháº¥y nhÃ¢n viÃªn Ä‘Æ°á»£c giao",
+            message="Không tìm thấy nhân viên được giao",
             http_status=404,
         )
 
     if user_info["primary_warehouse_id"] != task.warehouse_id:
         raise BusinessError(
             code="FORBIDDEN",
-            message="NhÃ¢n viÃªn khÃ´ng thuá»™c kho cá»§a nhiá»‡m vá»¥ nÃ y",
+            message="Nhân viên không thuộc kho của nhiệm vụ này",
             http_status=403,
         )
 
     if user_info["status"] != "ACTIVE":
         raise BusinessError(
             code="INVALID_STATE",
-            message="TÃ i khoáº£n nhÃ¢n viÃªn khÃ´ng á»Ÿ tráº¡ng thÃ¡i hoáº¡t Ä‘á»™ng (ACTIVE)",
+            message="Tài khoản nhân viên không ở trạng thái hoạt động (ACTIVE)",
             http_status=409,
         )
 
@@ -100,7 +99,7 @@ def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
     if not is_executor and not is_mgmt_general:
         raise BusinessError(
             code="FORBIDDEN",
-            message="NgÆ°á»i Ä‘Æ°á»£c giao khÃ´ng cÃ³ vai trÃ² nhÃ¢n viÃªn thá»±c thi há»£p lá»‡",
+            message="Ngưi được giao không có vai trò nhân viên thực thi hợp lệ",
             http_status=403,
         )
 
@@ -108,7 +107,7 @@ def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
         if not user_info["is_safety_checked"]:
             raise BusinessError(
                 code="FORBIDDEN",
-                message="NhÃ¢n viÃªn thá»i vá»¥ chÆ°a hoÃ n táº¥t kiá»ƒm tra an toÃ n lao Ä‘á»™ng",
+                message="Nhân viên thi vụ chưa hoàn tất kiểm tra an toàn lao động",
                 http_status=403,
             )
         now = datetime.now(timezone.utc)
@@ -119,14 +118,14 @@ def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
         ):
             raise BusinessError(
                 code="FORBIDDEN",
-                message="Thá»i háº¡n lÃ m viá»‡c cá»§a nhÃ¢n viÃªn thá»i vá»¥ khÃ´ng há»£p lá»‡ hoáº·c Ä‘Ã£ háº¿t háº¡n",
+                message="Thi hạn làm việc của nhân viên thi vụ không hợp lệ hoặc đã hết hạn",
                 http_status=403,
             )
 
     if user_info["primary_stage"] != task.stage:
         raise BusinessError(
             code="TASKS_STAGE_MISMATCH",
-            message="NhÃ¢n viÃªn khÃ´ng thuá»™c khÃ¢u lÃ m viá»‡c cá»§a nhiá»‡m vá»¥ nÃ y",
+            message="Nhân viên không thuộc khâu làm việc của nhiệm vụ này",
             http_status=409,
         )
 
@@ -134,13 +133,13 @@ def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
     if TaskRepository.count_open_tasks_for_user(db, user_id, task.warehouse_id) >= limit:
         raise BusinessError(
             code="TASKS_MAX_OPEN_EXCEEDED",
-            message=f"NhÃ¢n viÃªn Ä‘ang giá»¯ tá»‘i Ä‘a {limit} nhiá»‡m vá»¥ má»Ÿ",
+            message=f"Nhân viên đang giữ tối đa {limit} nhiệm vụ mở",
             http_status=409,
         )
 
 
 class TaskService:
-    """Service Ä‘iá»u phá»‘i vÃ²ng Ä‘á»i nhiá»‡m vá»¥ trong kho."""
+    """Service điu phối vòng đi nhiệm vụ trong kho."""
 
     @staticmethod
     def create_task(
@@ -149,7 +148,7 @@ class TaskService:
         creator_id: uuid.UUID,
         req: CreateTaskRequest,
     ) -> TaskResponse:
-        """Táº¡o má»›i nhiá»‡m vá»¥ vá»›i tráº¡ng thÃ¡i ban Ä‘áº§u UNASSIGNED vÃ  tÃ­nh `sla_due_at`."""
+        """Tạo mới nhiệm vụ với trạng thái ban đầu UNASSIGNED và tính `sla_due_at`."""
         sla_minutes = TaskRepository.get_task_sla_minutes(db, warehouse_id, req.task_type)
         sla_due_at = (
             datetime.now(timezone.utc) + timedelta(minutes=sla_minutes)
@@ -194,13 +193,13 @@ class TaskService:
         req: AssignTaskRequest,
         warehouse_id: uuid.UUID | None = None,
     ) -> TaskResponse:
-        """Giao nhiá»‡m vá»¥ cho nhÃ¢n viÃªn (chuyá»ƒn sang ASSIGNED)."""
+        """Giao nhiệm vụ cho nhân viên (chuyển sang ASSIGNED)."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
 
         if req.version_no != task.version_no:
             raise BusinessError(
                 code="VERSION_CONFLICT",
-                message="Nhiá»‡m vá»¥ Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t bá»Ÿi thao tÃ¡c khÃ¡c",
+                message="Nhiệm vụ đã được cập nhật bởi thao tác khác",
                 http_status=409,
                 details={"current_version_no": task.version_no},
             )
@@ -208,7 +207,7 @@ class TaskService:
         if task.status not in ("UNASSIGNED", "REJECTED"):
             raise BusinessError(
                 code="INVALID_STATE",
-                message=f"KhÃ´ng thá»ƒ giao nhiá»‡m vá»¥ Ä‘ang á»Ÿ tráº¡ng thÃ¡i `{task.status}`",
+                message=f"Không thể giao nhiệm vụ đang ở trạng thái `{task.status}`",
                 http_status=409,
             )
 
@@ -240,20 +239,20 @@ class TaskService:
         req: AcceptTaskRequest,
         warehouse_id: uuid.UUID | None = None,
     ) -> TaskResponse:
-        """NhÃ¢n viÃªn nháº­n nhiá»‡m vá»¥ (chuyá»ƒn sang IN_PROGRESS)."""
+        """Nhân viên nhận nhiệm vụ (chuyển sang IN_PROGRESS)."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
 
         if str(task.assigned_to) != str(worker_id):
             raise BusinessError(
                 code="FORBIDDEN",
-                message="Báº¡n khÃ´ng pháº£i nhÃ¢n viÃªn Ä‘Æ°á»£c giao nhiá»‡m vá»¥ nÃ y",
+                message="Bạn không phải nhân viên được giao nhiệm vụ này",
                 http_status=403,
             )
 
         if req.version_no != task.version_no:
             raise BusinessError(
                 code="VERSION_CONFLICT",
-                message="Nhiá»‡m vá»¥ Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t bá»Ÿi thao tÃ¡c khÃ¡c",
+                message="Nhiệm vụ đã được cập nhật bởi thao tác khác",
                 http_status=409,
                 details={"current_version_no": task.version_no},
             )
@@ -262,8 +261,8 @@ class TaskService:
             raise BusinessError(
                 code="INVALID_STATE",
                 message=(
-                    f"Chá»‰ cÃ³ thá»ƒ nháº­n nhiá»‡m vá»¥ khi á»Ÿ tráº¡ng thÃ¡i ASSIGNED "
-                    f"(hiá»‡n táº¡i: `{task.status}`)"
+                    f"Chỉ có thể nhận nhiệm vụ khi ở trạng thái ASSIGNED "
+                    f"(hiện tại: `{task.status}`)"
                 ),
                 http_status=409,
             )
@@ -292,20 +291,20 @@ class TaskService:
         req: RejectTaskRequest,
         warehouse_id: uuid.UUID | None = None,
     ) -> TaskResponse:
-        """NhÃ¢n viÃªn tá»« chá»‘i nhiá»‡m vá»¥ kÃ¨m lÃ½ do (chuyá»ƒn sang REJECTED)."""
+        """Nhân viên từ chối nhiệm vụ kèm lý do (chuyển sang REJECTED)."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
 
         if str(task.assigned_to) != str(worker_id):
             raise BusinessError(
                 code="FORBIDDEN",
-                message="Báº¡n khÃ´ng pháº£i nhÃ¢n viÃªn Ä‘Æ°á»£c giao nhiá»‡m vá»¥ nÃ y",
+                message="Bạn không phải nhân viên được giao nhiệm vụ này",
                 http_status=403,
             )
 
         if req.version_no != task.version_no:
             raise BusinessError(
                 code="VERSION_CONFLICT",
-                message="Nhiá»‡m vá»¥ Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t bá»Ÿi thao tÃ¡c khÃ¡c",
+                message="Nhiệm vụ đã được cập nhật bởi thao tác khác",
                 http_status=409,
                 details={"current_version_no": task.version_no},
             )
@@ -314,8 +313,8 @@ class TaskService:
             raise BusinessError(
                 code="INVALID_STATE",
                 message=(
-                    f"Chá»‰ cÃ³ thá»ƒ tá»« chá»‘i nhiá»‡m vá»¥ khi á»Ÿ tráº¡ng thÃ¡i ASSIGNED "
-                    f"(hiá»‡n táº¡i: `{task.status}`)"
+                    f"Chỉ có thể từ chối nhiệm vụ khi ở trạng thái ASSIGNED "
+                    f"(hiện tại: `{task.status}`)"
                 ),
                 http_status=409,
             )
@@ -344,20 +343,20 @@ class TaskService:
         req: CompleteTaskRequest,
         warehouse_id: uuid.UUID | None = None,
     ) -> TaskResponse:
-        """HoÃ n táº¥t nhiá»‡m vá»¥ (chuyá»ƒn sang COMPLETED, tiáº¿n Ä‘á»™ 100%)."""
+        """Hoàn tất nhiệm vụ (chuyển sang COMPLETED, tiến độ 100%)."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
 
         if str(task.assigned_to) != str(worker_id):
             raise BusinessError(
                 code="FORBIDDEN",
-                message="Báº¡n khÃ´ng pháº£i nhÃ¢n viÃªn Ä‘Æ°á»£c giao nhiá»‡m vá»¥ nÃ y",
+                message="Bạn không phải nhân viên được giao nhiệm vụ này",
                 http_status=403,
             )
 
         if req.version_no != task.version_no:
             raise BusinessError(
                 code="VERSION_CONFLICT",
-                message="Nhiá»‡m vá»¥ Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t bá»Ÿi thao tÃ¡c khÃ¡c",
+                message="Nhiệm vụ đã được cập nhật bởi thao tác khác",
                 http_status=409,
                 details={"current_version_no": task.version_no},
             )
@@ -366,8 +365,8 @@ class TaskService:
             raise BusinessError(
                 code="INVALID_STATE",
                 message=(
-                    f"Chá»‰ cÃ³ thá»ƒ hoÃ n táº¥t nhiá»‡m vá»¥ khi á»Ÿ tráº¡ng thÃ¡i IN_PROGRESS "
-                    f"(hiá»‡n táº¡i: `{task.status}`)"
+                    f"Chỉ có thể hoàn tất nhiệm vụ khi ở trạng thái IN_PROGRESS "
+                    f"(hiện tại: `{task.status}`)"
                 ),
                 http_status=409,
             )
@@ -399,13 +398,13 @@ class TaskService:
         req: ReassignTaskRequest,
         warehouse_id: uuid.UUID | None = None,
     ) -> TaskResponse:
-        """Äiá»u chuyá»ƒn nhiá»‡m vá»¥ sang nhÃ¢n viÃªn khÃ¡c."""
+        """iu chuyển nhiệm vụ sang nhân viên khác."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
 
         if req.version_no != task.version_no:
             raise BusinessError(
                 code="VERSION_CONFLICT",
-                message="Nhiá»‡m vá»¥ Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t bá»Ÿi thao tÃ¡c khÃ¡c",
+                message="Nhiệm vụ đã được cập nhật bởi thao tác khác",
                 http_status=409,
                 details={"current_version_no": task.version_no},
             )
@@ -413,14 +412,14 @@ class TaskService:
         if task.status in ("COMPLETED", "CANCELLED"):
             raise BusinessError(
                 code="INVALID_STATE",
-                message=f"KhÃ´ng thá»ƒ Ä‘iá»u chuyá»ƒn nhiá»‡m vá»¥ Ä‘ang á»Ÿ tráº¡ng thÃ¡i `{task.status}`",
+                message=f"Không thể điu chuyển nhiệm vụ đang ở trạng thái `{task.status}`",
                 http_status=409,
             )
 
         if task.assigned_to == req.new_assigned_to_user_id:
             raise BusinessError(
                 code="INVALID_STATE",
-                message="Nhiá»‡m vá»¥ Ä‘ang do chÃ­nh nhÃ¢n viÃªn nÃ y giá»¯",
+                message="Nhiệm vụ đang do chính nhân viên này giữ",
                 http_status=409,
             )
 
@@ -459,13 +458,13 @@ class TaskService:
         req: CancelTaskRequest,
         warehouse_id: uuid.UUID | None = None,
     ) -> TaskResponse:
-        """Há»§y nhiá»‡m vá»¥ chÆ°a hoÃ n táº¥t."""
+        """Hủy nhiệm vụ chưa hoàn tất."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
 
         if req.version_no != task.version_no:
             raise BusinessError(
                 code="VERSION_CONFLICT",
-                message="Nhiá»‡m vá»¥ Ä‘Ã£ Ä‘Æ°á»£c cáº­p nháº­t bá»Ÿi thao tÃ¡c khÃ¡c",
+                message="Nhiệm vụ đã được cập nhật bởi thao tác khác",
                 http_status=409,
                 details={"current_version_no": task.version_no},
             )
@@ -473,7 +472,7 @@ class TaskService:
         if task.status in ("COMPLETED", "CANCELLED"):
             raise BusinessError(
                 code="INVALID_STATE",
-                message=f"KhÃ´ng thá»ƒ há»§y nhiá»‡m vá»¥ Ä‘ang á»Ÿ tráº¡ng thÃ¡i `{task.status}`",
+                message=f"Không thể hủy nhiệm vụ đang ở trạng thái `{task.status}`",
                 http_status=409,
             )
 
@@ -500,7 +499,7 @@ class TaskService:
         status: str | None = None,
         queue_only: bool = False,
     ) -> list[TaskResponse]:
-        """Láº¥y danh sÃ¡ch nhiá»‡m vá»¥."""
+        """Lấy danh sách nhiệm vụ."""
         tasks = TaskRepository.get_tasks(
             db=db,
             warehouse_id=warehouse_id,
@@ -512,16 +511,16 @@ class TaskService:
 
     @staticmethod
     def get_task_by_id(db: Session, task_id: uuid.UUID) -> TaskResponse:
-        """Láº¥y chi tiáº¿t má»™t nhiá»‡m vá»¥."""
+        """Lấy chi tiết một nhiệm vụ."""
         task = TaskRepository.get_task_by_id(db, task_id)
         if not task:
             raise BusinessError(
-                code="NOT_FOUND", message="KhÃ´ng tÃ¬m tháº¥y nhiá»‡m vá»¥", http_status=404
+                code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404
             )
         return _task_to_schema(task)
 
 
-# Export cÃ¡c hÃ m cÃ´ng khai
+# Export các hàm công khai
 create_task = TaskService.create_task
 assign_task = TaskService.assign_task
 accept_task = TaskService.accept_task

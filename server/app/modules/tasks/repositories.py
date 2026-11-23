@@ -1,9 +1,9 @@
-﻿"""ABEST WMS - Táº§ng Truy váº¥n CSDL (Repository) cho PhÃ¢n há»‡ Nhiá»‡m vá»¥ (Tasks).
+"""ABEST WMS - Tầng Truy vấn CSDL (Repository) cho Phân hệ Nhiệm vụ (Tasks).
 
-Ngoáº¡i lá»‡ quy táº¯c 2.3 (Ä‘Ã£ thá»‘ng nháº¥t cÃ¹ng Leader):
-- Äá»c chá»‰-Ä‘á»c cáº¥u hÃ¬nh SLA & giá»›i háº¡n task tá»« `warehouse_configs` (module `master_data`).
-- Äá»c & khÃ³a dÃ²ng `users` (`FOR UPDATE`) kÃ¨m join `roles` (module `auth`) Ä‘á»ƒ kiá»ƒm tra Ä‘iá»u kiá»‡n
-  nháº­n viá»‡c (kho, tráº¡ng thÃ¡i ACTIVE, vai trÃ², khÃ¢u, an toÃ n thá»i vá»¥) vÃ  chá»‘ng giao Ä‘á»“ng thá»i.
+Ngoại lệ quy tắc 2.3 (đã thống nhất cùng Leader):
+- c chỉ-đc cấu hình SLA & giới hạn task từ `warehouse_configs` (module `master_data`).
+- c & khóa dòng `users` (`FOR UPDATE`) kèm join `roles` (module `auth`) để kiểm tra điu kiện
+  nhận việc (kho, trạng thái ACTIVE, vai trò, khâu, an toàn thi vụ) và chống giao đồng thi.
 """
 
 import json
@@ -17,18 +17,18 @@ from server.app.modules.tasks.models import Task
 
 
 class TaskRepository:
-    """Repository quáº£n lÃ½ cÃ¡c truy váº¥n vÃ  cáº­p nháº­t báº£ng `tasks`."""
+    """Repository quản lý các truy vấn và cập nhật bảng `tasks`."""
 
     @staticmethod
     def create_task(db: Session, task: Task) -> Task:
-        """Táº¡o má»›i má»™t nhiá»‡m vá»¥ trong CSDL."""
+        """Tạo mới một nhiệm vụ trong CSDL."""
         db.add(task)
         db.flush()
         return task
 
     @staticmethod
     def get_task_by_id(db: Session, task_id: uuid.UUID, for_update: bool = False) -> Task | None:
-        """Láº¥y thÃ´ng tin nhiá»‡m vá»¥ theo task_id (cÃ³ tÃ¹y chá»n khÃ³a dÃ²ng for_update)."""
+        """Lấy thông tin nhiệm vụ theo task_id (có tùy chn khóa dòng for_update)."""
         stmt = select(Task).where(Task.task_id == task_id)
         if for_update:
             stmt = stmt.with_for_update()
@@ -42,7 +42,7 @@ class TaskRepository:
         status: str | None = None,
         queue_only: bool = False,
     ) -> list[Task]:
-        """Láº¥y danh sÃ¡ch nhiá»‡m vá»¥ cÃ³ lá»c theo kho, ngÆ°á»i thá»±c hiá»‡n, hÃ ng Ä‘á»£i hoáº·c tráº¡ng thÃ¡i."""
+        """Lấy danh sách nhiệm vụ có lc theo kho, ngưi thực hiện, hàng đợi hoặc trạng thái."""
         stmt = (
             select(Task).where(Task.warehouse_id == warehouse_id).order_by(Task.created_at.desc())
         )
@@ -56,7 +56,7 @@ class TaskRepository:
 
     @staticmethod
     def count_open_tasks_for_user(db: Session, user_id: uuid.UUID, warehouse_id: uuid.UUID) -> int:
-        """Äáº¿m sá»‘ lÆ°á»£ng task chÆ°a hoÃ n táº¥t (ASSIGNED, IN_PROGRESS, PAUSED_OFFLINE) cá»§a nhÃ¢n viÃªn."""
+        """ếm số lượng task chưa hoàn tất (ASSIGNED, IN_PROGRESS, PAUSED_OFFLINE) của nhân viên."""
         stmt = select(func.count()).where(
             Task.warehouse_id == warehouse_id,
             Task.assigned_to == user_id,
@@ -66,7 +66,7 @@ class TaskRepository:
 
     @staticmethod
     def get_max_open_tasks(db: Session, warehouse_id: uuid.UUID) -> int:
-        """Äá»c giá»›i háº¡n task má»Ÿ cá»§a má»—i nhÃ¢n viÃªn theo cáº¥u hÃ¬nh kho (máº·c Ä‘á»‹nh 3)."""
+        """c giới hạn task mở của mỗi nhân viên theo cấu hình kho (mặc định 3)."""
         row = db.execute(
             text("SELECT max_open_tasks_per_user FROM warehouse_configs WHERE warehouse_id = :w"),
             {"w": warehouse_id},
@@ -75,7 +75,7 @@ class TaskRepository:
 
     @staticmethod
     def get_task_sla_minutes(db: Session, warehouse_id: uuid.UUID, task_type: str) -> int | None:
-        """Äá»c thá»i gian SLA (phÃºt) theo loáº¡i task tá»« `warehouse_configs.task_sla_minutes`."""
+        """c thi gian SLA (phút) theo loại task từ `warehouse_configs.task_sla_minutes`."""
         row = db.execute(
             text("SELECT task_sla_minutes FROM warehouse_configs WHERE warehouse_id = :w"),
             {"w": warehouse_id},
@@ -88,7 +88,7 @@ class TaskRepository:
 
     @staticmethod
     def lock_user_for_assignment(db: Session, user_id: uuid.UUID) -> dict[str, Any] | None:
-        """KhÃ³a dÃ²ng nhÃ¢n viÃªn (chá»‘ng giao Ä‘á»“ng thá»i) vÃ  tráº£ vá» há»“ sÆ¡ kiá»ƒm tra Ä‘iá»u kiá»‡n nháº­n viá»‡c."""
+        """Khóa dòng nhân viên (chống giao đồng thi) và trả v hồ sơ kiểm tra điu kiện nhận việc."""
         row = (
             db.execute(
                 text(

@@ -1,10 +1,11 @@
-﻿"""ABEST WMS - Kiá»ƒm thá»­ PhÃ¢n há»‡ Nhiá»‡m vá»¥ (Tasks): assign, reassign, cancel (D-01, D-02).
+"""ABEST WMS - Kiểm thử Phân hệ Nhiệm vụ (Tasks): assign, reassign, cancel (D-01, D-02).
 
-Gá»“m hai nhÃ³m:
-- Kiá»ƒm thá»­ service (cÃ³ rollback sau má»—i bÃ i, khÃ´ng Ä‘á»ƒ láº¡i dá»¯ liá»‡u): giao, Ä‘iá»u chuyá»ƒn, há»§y,
-  khÃ³a láº¡c quan `version_no`, giá»›i háº¡n task má»Ÿ (gá»“m PAUSED_OFFLINE), pháº¡m vi kho, Ä‘iá»u kiá»‡n nhÃ¢n viÃªn,
-  tÃ­nh `sla_due_at` vÃ  audit log (`TASK_REJECT`, `TASK_REASSIGN`, `TASK_CANCEL`).
-- Kiá»ƒm thá»­ endpoint: má»—i endpoint thá»­ 1 vai trÃ² Ä‘Ãºng vÃ  1 vai trÃ² sai.
+Gồm hai nhóm:
+- Kiểm thử service (có rollback sau mỗi bài, không để lại dữ liệu): giao, điu chuyển, hủy,
+  khóa lạc quan `version_no`, giới hạn task mở (gồm PAUSED_OFFLINE), phạm vi kho, điu kiện nhân
+  viên,
+  tính `sla_due_at` và audit log (`TASK_REJECT`, `TASK_REASSIGN`, `TASK_CANCEL`).
+- Kiểm thử endpoint: mỗi endpoint thử 1 vai trò đúng và 1 vai trò sai.
 """
 
 import uuid
@@ -42,7 +43,7 @@ PASSWORD = "Demo@123456"
 
 @pytest.fixture
 def db_session() -> Generator[Session, None, None]:
-    """Session CSDL Ä‘á»™c láº­p, luÃ´n rollback Ä‘á»ƒ khÃ´ng Ä‘á»ƒ láº¡i dá»¯ liá»‡u thá»­ nghiá»‡m."""
+    """Session CSDL độc lập, luôn rollback để không để lại dữ liệu thử nghiệm."""
     session: Session = SessionLocal()
     try:
         yield session
@@ -55,7 +56,7 @@ def _user_id(db: Session, username: str) -> uuid.UUID:
     value = db.execute(
         text("SELECT user_id FROM users WHERE username = :u"), {"u": username}
     ).scalar()
-    assert value is not None, f"KhÃ´ng cÃ³ tÃ i khoáº£n seed {username}"
+    assert value is not None, f"Không có tài khoản seed {username}"
     return uuid.UUID(str(value))
 
 
@@ -71,7 +72,7 @@ def _new_task(
     task_type: TaskTypeLiteral = "PUTAWAY",
     priority: TaskPriorityLiteral = "NORMAL",
 ) -> TaskResponse:
-    """Táº¡o task UNASSIGNED báº±ng service (chÆ°a commit)."""
+    """Tạo task UNASSIGNED bằng service (chưa commit)."""
     wh_id = _warehouse_id(db)
     return TaskService.create_task(
         db,
@@ -194,7 +195,7 @@ def test_assign_different_warehouse_task_not_found(db_session: Session) -> None:
 
 def test_assign_inactive_or_unsafe_seasonal_user_rejected(db_session: Session) -> None:
     nv_cat_id = _user_id(db_session, "nv_cat")
-    # 1. NhÃ¢n viÃªn bá»‹ khÃ³a (INACTIVE)
+    # 1. Nhân viên bị khóa (INACTIVE)
     db_session.execute(
         text("UPDATE users SET status = 'INACTIVE' WHERE user_id = :u"), {"u": nv_cat_id}
     )
@@ -204,10 +205,11 @@ def test_assign_inactive_or_unsafe_seasonal_user_rejected(db_session: Session) -
     assert exc_inactive.value.code == "INVALID_STATE"
     assert exc_inactive.value.http_status == 409
 
-    # 2. KhÃ´i phá»¥c ACTIVE nhÆ°ng Ä‘áº·t thá»i vá»¥ chÆ°a kiá»ƒm tra an toÃ n
+    # 2. Khôi phục ACTIVE nhưng đặt thi vụ chưa kiểm tra an toàn
     db_session.execute(
         text(
-            "UPDATE users SET status = 'ACTIVE', is_seasonal = TRUE, valid_until = NOW() + INTERVAL '7 days', is_safety_checked = FALSE "
+            "UPDATE users SET status = 'ACTIVE', is_seasonal = TRUE, valid_until = NOW() +
+            INTERVAL '7 days', is_safety_checked = FALSE "
             "WHERE user_id = :u"
         ),
         {"u": nv_cat_id},
@@ -226,7 +228,7 @@ def test_assign_exceeds_max_open_tasks_including_paused_offline(db_session: Sess
         assigned_list.append(
             _assign(db_session, _new_task(db_session, "KIEM_KE", "CYCLE_COUNT"), "nv_kiemke")
         )
-    # ÄÆ°a 1 task sang PAUSED_OFFLINE: váº«n pháº£i tÃ­nh lÃ  task má»Ÿ
+    # ưa 1 task sang PAUSED_OFFLINE: vẫn phải tính là task mở
     db_session.execute(
         text("UPDATE tasks SET status = 'PAUSED_OFFLINE' WHERE task_id = :t"),
         {"t": assigned_list[0].task_id},
@@ -262,7 +264,7 @@ def test_reassign_resets_started_at_and_logs_reason(db_session: Session) -> None
         task_id=task.task_id,
         assigner_id=thukho_id,
         req=ReassignTaskRequest(
-            new_assigned_to_user_id=quanly_id, reason="Äá»•i ca", version_no=started.version_no
+            new_assigned_to_user_id=quanly_id, reason="ổi ca", version_no=started.version_no
         ),
         warehouse_id=task.warehouse_id,
     )
@@ -270,7 +272,7 @@ def test_reassign_resets_started_at_and_logs_reason(db_session: Session) -> None
     assert moved.assigned_to == quanly_id
     assert moved.started_at is None
     assert moved.version_no == started.version_no + 1
-    assert _audit_reason(db_session, task.task_id, "TASK_REASSIGN") == "Äá»•i ca"
+    assert _audit_reason(db_session, task.task_id, "TASK_REASSIGN") == "ổi ca"
 
 
 def test_reassign_to_same_user_is_rejected(db_session: Session) -> None:
@@ -282,7 +284,7 @@ def test_reassign_to_same_user_is_rejected(db_session: Session) -> None:
             assigner_id=_user_id(db_session, "thukho"),
             req=ReassignTaskRequest(
                 new_assigned_to_user_id=_user_id(db_session, "nv_cat"),
-                reason="TrÃ¹ng ngÆ°á»i",
+                reason="Trùng ngưi",
                 version_no=task.version_no,
             ),
             warehouse_id=task.warehouse_id,
@@ -299,7 +301,7 @@ def test_reassign_wrong_stage_is_rejected(db_session: Session) -> None:
             assigner_id=_user_id(db_session, "thukho"),
             req=ReassignTaskRequest(
                 new_assigned_to_user_id=_user_id(db_session, "nv_nhan"),
-                reason="Sai khÃ¢u",
+                reason="Sai khâu",
                 version_no=task.version_no,
             ),
             warehouse_id=task.warehouse_id,
@@ -316,7 +318,7 @@ def test_reassign_wrong_version_conflict(db_session: Session) -> None:
             assigner_id=_user_id(db_session, "thukho"),
             req=ReassignTaskRequest(
                 new_assigned_to_user_id=_user_id(db_session, "quanly"),
-                reason="Lá»‡ch phiÃªn báº£n",
+                reason="Lệch phiên bản",
                 version_no=99,
             ),
             warehouse_id=task.warehouse_id,
@@ -330,11 +332,11 @@ def test_reject_logs_task_reject_audit(db_session: Session) -> None:
         db_session,
         task_id=task.task_id,
         worker_id=_user_id(db_session, "nv_cat"),
-        req=RejectTaskRequest(rejection_reason="Ká»‡ Ä‘áº§y", version_no=task.version_no),
+        req=RejectTaskRequest(rejection_reason="Kệ đầy", version_no=task.version_no),
         warehouse_id=task.warehouse_id,
     )
     assert rejected.status == "REJECTED"
-    assert _audit_reason(db_session, task.task_id, "TASK_REJECT") == "Ká»‡ Ä‘áº§y"
+    assert _audit_reason(db_session, task.task_id, "TASK_REJECT") == "Kệ đầy"
 
 
 # ----------------------------------------------------------------------------
@@ -348,12 +350,12 @@ def test_cancel_logs_reason_without_touching_rejection_reason(db_session: Sessio
         db_session,
         task_id=task.task_id,
         actor_id=_user_id(db_session, "thukho"),
-        req=CancelTaskRequest(cancel_reason="Há»§y Ä‘Æ¡n", version_no=task.version_no),
+        req=CancelTaskRequest(cancel_reason="Hủy đơn", version_no=task.version_no),
         warehouse_id=task.warehouse_id,
     )
     assert cancelled.status == "CANCELLED"
     assert cancelled.rejection_reason is None
-    assert _audit_reason(db_session, task.task_id, "TASK_CANCEL") == "Há»§y Ä‘Æ¡n"
+    assert _audit_reason(db_session, task.task_id, "TASK_CANCEL") == "Hủy đơn"
 
 
 def test_cancel_twice_is_invalid_state(db_session: Session) -> None:
@@ -362,7 +364,7 @@ def test_cancel_twice_is_invalid_state(db_session: Session) -> None:
         db_session,
         task_id=task.task_id,
         actor_id=_user_id(db_session, "thukho"),
-        req=CancelTaskRequest(cancel_reason="Há»§y láº§n 1", version_no=task.version_no),
+        req=CancelTaskRequest(cancel_reason="Hủy lần 1", version_no=task.version_no),
         warehouse_id=task.warehouse_id,
     )
     with pytest.raises(BusinessError) as exc:
@@ -370,7 +372,7 @@ def test_cancel_twice_is_invalid_state(db_session: Session) -> None:
             db_session,
             task_id=task.task_id,
             actor_id=_user_id(db_session, "thukho"),
-            req=CancelTaskRequest(cancel_reason="Há»§y láº§n 2", version_no=cancelled.version_no),
+            req=CancelTaskRequest(cancel_reason="Hủy lần 2", version_no=cancelled.version_no),
             warehouse_id=task.warehouse_id,
         )
     assert exc.value.code == "INVALID_STATE"
@@ -398,7 +400,7 @@ def test_cancel_completed_task_is_invalid_state(db_session: Session) -> None:
             db_session,
             task_id=task.task_id,
             actor_id=_user_id(db_session, "thukho"),
-            req=CancelTaskRequest(cancel_reason="Há»§y task Ä‘Ã£ xong", version_no=done.version_no),
+            req=CancelTaskRequest(cancel_reason="Hủy task đã xong", version_no=done.version_no),
             warehouse_id=task.warehouse_id,
         )
     assert exc.value.code == "INVALID_STATE"
@@ -418,25 +420,25 @@ def test_cancel_wrong_version_conflict(db_session: Session) -> None:
 
 
 # ----------------------------------------------------------------------------
-# Endpoint: vai trÃ² Ä‘Ãºng vÃ  vai trÃ² sai cho toÃ n bá»™ endpoint
+# Endpoint: vai trò đúng và vai trò sai cho toàn bộ endpoint
 # ----------------------------------------------------------------------------
 
 
 def _login(username: str) -> tuple[dict[str, str], str]:
     res = client.post("/api/v1/auth/login", json={"username": username, "password": PASSWORD})
-    assert res.status_code == 200, f"ÄÄƒng nháº­p tháº¥t báº¡i cho {username}"
+    assert res.status_code == 200, f"ăng nhập thất bại cho {username}"
     data = res.json()["data"]
     return {"Authorization": f"Bearer {data['access_token']}"}, str(data["user"]["user_id"])
 
 
 def test_endpoints_full_lifecycle_and_rbac() -> None:
-    """Thá»­ Ä‘á»§ cÃ¡c endpoint cá»§a tasks vá»›i vai trÃ² Ä‘Ãºng (thukho, nv_cat) vÃ  vai trÃ² sai (nv_nhan)."""
+    """Thử đủ các endpoint của tasks với vai trò đúng (thukho, nv_cat) và vai trò sai (nv_nhan)."""
     thukho, thukho_id = _login("thukho")
     _, quanly_id = _login("quanly")
     nv_cat, nv_cat_id = _login("nv_cat")
     nv_nhan, _ = _login("nv_nhan")
 
-    # 1. GET /tasks & POST /tasks: vai trÃ² Ä‘Ãºng (thukho) -> 200, vai trÃ² sai (nv_nhan) -> 403
+    # 1. GET /tasks & POST /tasks: vai trò đúng (thukho) -> 200, vai trò sai (nv_nhan) -> 403
     assert client.get(BASE, headers=thukho).status_code == 200
     assert (
         client.post(
@@ -478,7 +480,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
         assert res.status_code == 200, res.text
         version = res.json()["data"]["version_no"]
 
-        # 3. GET /{id}, POST /accept, POST /complete: vai trÃ² sai (nv_nhan khÃ´ng Ä‘Æ°á»£c giao) -> 403
+        # 3. GET /{id}, POST /accept, POST /complete: vai trò sai (nv_nhan không được giao) -> 403
         assert client.get(f"{BASE}/{task_id}", headers=nv_nhan).status_code == 403
         assert (
             client.post(
@@ -490,22 +492,23 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
             client.post(
                 f"{BASE}/{task_id}/reject",
                 headers=nv_nhan,
-                json={"rejection_reason": "Sai ngÆ°á»i", "version_no": version},
+                json={"rejection_reason": "Sai ngưi", "version_no": version},
             ).status_code
             == 403
         )
 
-        # Vai trÃ² Ä‘Ãºng (nv_cat Ä‘Æ°á»£c giao): GET /{id}, POST /reject -> 200
+        # Vai trò đúng (nv_cat được giao): GET /{id}, POST /reject -> 200
         assert client.get(f"{BASE}/{task_id}", headers=nv_cat).status_code == 200
         res_rej = client.post(
             f"{BASE}/{task_id}/reject",
             headers=nv_cat,
-            json={"rejection_reason": "Cáº§n kiá»ƒm tra láº¡i vá»‹ trÃ­", "version_no": version},
+            json={"rejection_reason": "Cần kiểm tra lại vị trí", "version_no": version},
         )
         assert res_rej.status_code == 200, res_rej.text
         version = res_rej.json()["data"]["version_no"]
 
-        # 4. POST /reassign sang quanly (trÃªn task QUAN_LY_CHUNG) vÃ  accept + complete trÃªn task CAT_HANG
+        # 4. POST /reassign sang quanly (trên task QUAN_LY_CHUNG) và accept + complete trên task
+        CAT_HANG
         res_re = client.post(
             f"{BASE}/{task_id}/assign",
             headers=thukho,
@@ -520,7 +523,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
         assert res_acc.status_code == 200
         version = res_acc.json()["data"]["version_no"]
 
-        # Vai trÃ² sai (nv_nhan) gá»i complete -> 403; vai trÃ² Ä‘Ãºng (nv_cat) -> 200
+        # Vai trò sai (nv_nhan) gi complete -> 403; vai trò đúng (nv_cat) -> 200
         assert (
             client.post(
                 f"{BASE}/{task_id}/complete", headers=nv_nhan, json={"version_no": version}
@@ -532,7 +535,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
         )
         assert res_done.status_code == 200
     finally:
-        # Táº¡o 1 task phá»¥ Ä‘á»ƒ test reassign + cancel vÃ  dá»n sáº¡ch
+        # Tạo 1 task phụ để test reassign + cancel và dn sạch
         extra = client.post(
             BASE,
             headers=thukho,
@@ -555,14 +558,14 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
             headers=thukho,
             json={
                 "new_assigned_to_user_id": quanly_id,
-                "reason": "CÃ¢n báº±ng táº£i",
+                "reason": "Cân bằng tải",
                 "version_no": r1["version_no"],
             },
         ).json()["data"]
         r3 = client.post(
             f"{BASE}/{ex_id}/cancel",
             headers=thukho,
-            json={"cancel_reason": "Dá»n dá»¯ liá»‡u kiá»ƒm thá»­", "version_no": r2["version_no"]},
+            json={"cancel_reason": "Dn dữ liệu kiểm thử", "version_no": r2["version_no"]},
         )
         assert r3.status_code == 200
 
@@ -579,7 +582,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
     ],
 )
 def test_endpoints_forbidden_for_worker_role(action: str, body: dict[str, Any]) -> None:
-    """nv_nhan (nhÃ¢n viÃªn thá»±c thi) gá»i endpoint cá»§a quáº£n lÃ½ pháº£i bá»‹ 403."""
+    """nv_nhan (nhân viên thực thi) gi endpoint của quản lý phải bị 403."""
     headers, _ = _login("nv_nhan")
     res = client.post(f"{BASE}/{uuid.uuid4()}/{action}", headers=headers, json=body)
     assert res.status_code == 403
