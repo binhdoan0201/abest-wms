@@ -8,17 +8,17 @@ Tài liệu này quy định chuẩn làm việc, quản lý nhánh, commit và 
 
 | Nhánh | Mục đích | Ai được ghi / gộp |
 | :--- | :--- | :--- |
-| `main` | Bản ổn định, chạy demo; gắn tag phát hành | Chỉ Leader @A gộp (merge) |
+| `main` | Bản ổn định, chạy demo; gắn tag phát hành | Chỉ Leader Đoàn Duy Bình (`@binhdoan0201`) gộp (merge) |
 | `develop` | Tích hợp công việc chung của cả nhóm | Gộp qua Pull Request (PR) |
 | `feature/<module>` | Nhánh dài hạn của thành viên phụ trách module | Chủ module |
 | `feature/<module>/<việc>` | Nhánh ngắn hạn cho một việc cụ thể | Chủ module |
 | `fix/<mô-tả>` | Sửa lỗi cụ thể | Người sửa |
 
 ### Phân công nhánh theo thành viên:
-- **A (Leader):** `feature/core-auth`, `feature/inventory`, `feature/integrations-mock`
-- **B:** `feature/master-data`, `feature/inbound`
-- **C:** `feature/outbound`
-- **D:** `feature/tasks`, `feature/approvals`, `feature/cycle-count`, `feature/dashboard`
+- **Đoàn Duy Bình (Leader):** `feature/core-auth`, `feature/inventory`, `feature/integrations-mock`, `feature/master-data`, `feature/dashboard`
+- **Mai Hữu Phước:** `feature/inbound`, `feature/cycle-count`
+- **Hồ Quốc Cường:** `feature/outbound`
+- **Nguyễn Đức Hiếu:** `feature/tasks`, `feature/approvals`
 
 ---
 
@@ -27,11 +27,11 @@ Tài liệu này quy định chuẩn làm việc, quản lý nhánh, commit và 
 1. **Tuyệt đối không push trực tiếp** lên nhánh `main` và `develop`. Mọi thay đổi đều phải thông qua Pull Request, cần ít nhất 1 người duyệt (approve) và toàn bộ CI kiểm tra pass (`green`), gộp theo phương thức `squash`.
 2. **Rebase thường xuyên:** Đầu mỗi ngày làm việc, kéo nhánh `develop` mới nhất về và rebase nhánh feature của mình để phát hiện và giải quyết xung đột sớm nhất.
 3. **Quy định Reviewer:**
-   - PR của B, C, D do A duyệt.
-   - PR của A do B duyệt.
+   - PR của Mai Hữu Phước, Hồ Quốc Cường, Nguyễn Đức Hiếu do Đoàn Duy Bình duyệt.
+   - PR của Đoàn Duy Bình do Mai Hữu Phước duyệt.
    - PR có ảnh hưởng hoặc gọi sang module khác phải gắn thêm chủ module liên quan.
 4. **Phạm vi chỉnh sửa:** Chỉ sửa mã nguồn trong module được phân công. Giao tiếp giữa các module chỉ thực hiện qua hàm công khai của `services`.
-5. **Các file dùng chung chỉ Leader @A được sửa:**
+5. **Các file dùng chung chỉ Leader Đoàn Duy Bình (`@binhdoan0201`) được sửa:**
    - `server/app/core/`
    - `server/app/shared/`
    - `server/app/main.py`

@@ -102,6 +102,7 @@ abest-wms/
 │  └─ workflows/ci.yml        # ruff, black --check, mypy, pytest
 ├─ docs/
 │  ├─ spec/                   # đặc tả và chuẩn công nghệ + API
+│  ├─ PHAN_CONG.md            # bản phân công có họ tên (nguồn: mục 8)
 │  ├─ source/                 # slide v3, drawio v2 (tài liệu gốc)
 │  ├─ adr/                    # quyết định kiến trúc: 0001-cong-nghe.md ...
 │  ├─ api/                    # hợp đồng API từng module
@@ -142,7 +143,7 @@ abest-wms/
 │     ├─ static/              # css, js, ảnh
 │     ├─ templates/_base/     # layout, menu theo vai trò, component chung
 │     └─ modules/<module>/    # views.py, templates/, forms.py (cùng tên module phía server)
-└─ scripts/                   # reset_db.sh, run_db_tests.sh, create_branches.sh, check_structure.py
+└─ scripts/                   # reset_db.sh, run_db_tests.sh, create_branches.sh, check_structure.py, check_assignments.py
 ```
 
 Mỗi module phía server có đúng 5 file: `models.py`, `schemas.py`, `repositories.py`, `services.py`, `routers.py`, cộng `__init__.py` chỉ export các hàm công khai mà module khác được phép gọi.
@@ -264,13 +265,13 @@ Các quy tắc 2, 3, 6 và 7 trên đã được DB cưỡng chế (trigger SoD,
 | M0 | `core` + `auth` | `users`, `roles`, `permissions`, `role_permissions`, `audit_logs` | không | A |
 | M1 | `inventory` | `lots`, `pallets`, `inventory_balances`, `inventory_transactions` | master\_data | A |
 | M2 | `integrations` (mock) | `integration_sync_logs` | không | A |
-| M3 | `master_data` | `warehouses`, `warehouse_configs`, `zones`, `locations`, `item_categories`, `skus`, `sku_barcodes`, `suppliers`, `customers`, `reason_codes`, `box_types` | auth | B |
+| M3 | `master_data` | `warehouses`, `warehouse_configs`, `zones`, `locations`, `item_categories`, `skus`, `sku_barcodes`, `suppliers`, `customers`, `reason_codes`, `box_types` | auth | A |
 | M4 | `inbound` | `purchase_orders`, `po_lines`, `asns`, `grns`, `grn_lines` | inventory, tasks, approvals | B |
 | M5 | `outbound` | `outbound_orders`, `outbound_order_lines`, `pick_sessions`, `pick_lines`, `packages`, `goods_issues` | inventory, tasks | C |
 | M6 | `tasks` | `tasks` | auth | D |
 | M7 | `approvals` | `approval_requests`, `approval_histories`, `stock_adjustments` | tasks, inventory | D |
-| M8 | `cycle_count` | `cycle_count_sheets`, `cycle_count_lines`, `cycle_count_attempts` | inventory, tasks, approvals | D |
-| M9 | `dashboard` (chỉ đọc) | truy vấn tổng hợp | tất cả | D |
+| M8 | `cycle_count` | `cycle_count_sheets`, `cycle_count_lines`, `cycle_count_attempts` | inventory, tasks, approvals | B |
+| M9 | `dashboard` (chỉ đọc) | truy vấn tổng hợp | tất cả | A |
 
 Bảng thêm từ patch v4.2.1: `inventory_allocations` (inventory, outbound), `package_lines` và `order_change_requests` (outbound), `grn_count_attempts` (inbound), `return_order_lines` (giai đoạn sau, hàng trả).
 
@@ -314,10 +315,10 @@ Nhánh theo người và module:
 
 | Thành viên | Nhánh phụ trách |
 | --- | --- |
-| **A (leader)** | `feature/core-auth`, `feature/inventory`, `feature/integrations-mock` |
-| **B** | `feature/master-data`, `feature/inbound` |
+| **A (leader)** | `feature/core-auth`, `feature/inventory`, `feature/integrations-mock`, `feature/master-data`, `feature/dashboard` |
+| **B** | `feature/inbound`, `feature/cycle-count` |
 | **C** | `feature/outbound` |
-| **D** | `feature/tasks`, `feature/approvals`, `feature/cycle-count`, `feature/dashboard` |
+| **D** | `feature/tasks`, `feature/approvals` |
 
 ### 7.2 Quy tắc làm việc
 
@@ -341,6 +342,8 @@ Nhánh theo người và module:
 
 Quy ước: Ưu tiên P1 = bắt buộc cho demo, P2 = nên có, P3 = nếu còn thời gian. Mã quyền (NH-, TK-, QL-...) lấy từ slide v3.
 
+**Nguồn sự thật của phân công:** bảng ở mục 8 là bản gốc dùng chữ A đến D; bản có họ tên nằm ở `docs/PHAN_CONG.md` trong repo. Khi đổi phân công, sửa mục 8 trước rồi chạy lại prompt cập nhật tài liệu nhóm; script `scripts/check_assignments.py` sẽ báo nếu hai bên lệch nhau.
+
 **Điều chỉnh theo patch v4.2.1** (nghiệp vụ lõi đã nằm ở DB, Python gọi chứ không viết lại; công giảm khoảng 3 đến 5 người-ngày):
 
 - A-06 chỉ bọc `fn_apply_inventory_movement`, `fn_transfer_inventory` và làm API tra cứu.
@@ -349,14 +352,16 @@ Quy ước: Ưu tiên P1 = bắt buộc cho demo, P2 = nên có, P3 = nếu còn
 - C-07 nâng từ P3 lên P2: chủ yếu gọi `fn_receive_erp_order_change` và `fn_decide_order_change`.
 - D-04, D-05: màn hình duyệt có bộ lọc hồ sơ hết hạn theo `approval_expired_at`.
 
+**Cân bằng khối lượng (13/11/2026):** `master_data` và `dashboard` (kèm giao diện Admin và `bgd`) chuyển từ B và D sang A; `cycle_count` (kèm giao diện `nv-kiemke`) chuyển từ D sang B. Chuyển nguyên module nên mỗi người vẫn làm đủ Model, Controller, View của module mình. Mã việc mới là A-10 đến A-13, B-09 và B-10; các mã B-01, B-02, D-06, D-07 không còn dùng. Tên nhánh `feature/...` không đổi.
+
 ### 8.1 Tóm tắt
 
 | Thành viên | Vai trò | Module | Giao diện client phụ trách |
 | --- | --- | --- | --- |
-| **A** | Leader, kiến trúc, tích hợp | core, auth, inventory, integrations | Khung client, đăng nhập, tra cứu tồn |
-| **B** | Danh mục và nhập kho | master\_data, inbound (gồm cất hàng) | Admin, `nv-nhan`, `nv-cat` |
+| **A** | Leader, kiến trúc, tích hợp | core, auth, inventory, integrations, master\_data, dashboard | Khung client, đăng nhập, tra cứu tồn, Admin, `bgd` |
+| **B** | Nhập kho và kiểm kê | inbound (gồm cất hàng), cycle\_count | `nv-nhan`, `nv-cat`, `nv-kiemke` |
 | **C** | Xuất kho | outbound | `nv-soan`, `nv-dongoi` |
-| **D** | Điều phối, duyệt, kiểm kê | tasks, approvals, cycle\_count, dashboard | `thukho`, `quanly`, `bgd`, `nv-kiemke` |
+| **D** | Điều phối và duyệt | tasks, approvals | `thukho`, `quanly` |
 
 ### 8.2 Thành viên A (leader)
 
@@ -367,23 +372,27 @@ Quy ước: Ưu tiên P1 = bắt buộc cho demo, P2 = nên có, P3 = nếu còn
 | A-03 | Auth: đăng nhập JWT, làm mới token, `/me`, bắt đổi mật khẩu lần đầu, khóa tài khoản khi sai quá số lần | `feature/core-auth` | P1 |
 | A-04 | RBAC: `require_permission`, lọc theo kho, `X_OWN`/`V_OWN`, kiểm tra SoD ở tầng ứng dụng | `feature/core-auth` | P1 |
 | A-05 | Audit log, exception handler, chuẩn response, bảng mã lỗi, xử lý xung đột phiên bản (409) | `feature/core-auth` | P1 |
-| A-06 | Inventory: lô, pallet, tồn 5 trạng thái, sổ cái; `apply_movement` (RECEIVE, PUTAWAY, ALLOCATE, DEALLOCATE, PICK, SHIP\_GI, ADJUSTMENT, LOCK\_COUNT); API tra cứu theo SKU, vị trí, lô (QL-1.1 đến QL-1.4) | `feature/inventory` | P1 |
+| A-06 | Inventory: lô, pallet, tồn 5 trạng thái, sổ cái; `apply_movement` (`RECEIVE`, `PUTAWAY`, `ALLOCATE`, `DEALLOCATE`, `PICK`, `SHIP_GI`, `ADJUSTMENT`, `LOCK_COUNT`); API tra cứu theo SKU, vị trí, lô (QL-1.1 đến QL-1.4) | `feature/inventory` | P1 |
 | A-07 | ERP mock và TMS mock: đẩy PO, ASN, SO mẫu; nhận GRN, GI; ghi `integration_sync_logs`; thử lại khi lỗi | `feature/integrations-mock` | P1 |
 | A-08 | Client lõi: `api_client`, phiên đăng nhập, layout, menu theo quyền, trang tra cứu tồn | `feature/core-auth` | P1 |
 | A-09 | Review PR, giải quyết xung đột, gộp `develop` và `main`, gắn tag, viết bài test e2e theo kịch bản demo | các nhánh | P1 |
+| A-10 | API danh mục (chuyển từ B-01): kho và cấu hình, zone, vị trí, nhóm hàng, SKU, mã vạch, NCC, khách hàng, mã lý do, loại thùng | `feature/master-data` | P1 |
+| A-11 | Client cho Admin (chuyển từ B-02): màn hình danh mục và quản lý người dùng | `feature/master-data` | P2 |
+| A-12 | Dashboard cơ bản (chuyển từ D-07): thẻ số task (TK-2.1), tồn, đơn trong ngày cho BGĐ; cảnh báo đơn giản trong app | `feature/dashboard` | P2 |
+| A-13 | Client cho `bgd` (chuyển từ D-08) | `feature/dashboard` | P1 |
 
 ### 8.3 Thành viên B
 
 | Mã | Công việc | Nhánh | Ưu tiên |
 | --- | --- | --- | --- |
-| B-01 | API danh mục: kho và cấu hình, zone, vị trí, nhóm hàng, SKU, mã vạch, NCC, khách hàng, mã lý do, loại thùng | `feature/master-data` | P1 |
-| B-02 | Client cho Admin: màn hình danh mục và quản lý người dùng (gọi API của A) | `feature/master-data` | P2 |
 | B-03 | PO, ASN: nhận từ ERP mock, danh sách, chi tiết (QL-2.1, QL-2.3) | `feature/inbound` | P1 |
 | B-04 | GRN đếm mù: chọn phiếu, quét SKU, lô, hạn dùng, serial, lưu tạm (NH-1 đến NH-4) | `feature/inbound` | P1 |
 | B-05 | Xử lý lệch: cảnh báo thừa, thiếu, hư, cách ly pallet, tạo yêu cầu duyệt (gọi `approvals` của D), đếm lại NH-5 | `feature/inbound` | P1 |
 | B-06 | Hoàn tất GRN: tạo pallet, tem pallet (mock), trạng thái STAGED, cộng PO (tương ứng `fn_sync_po_on_grn_approved`), sinh task PUTAWAY | `feature/inbound` | P1 |
 | B-07 | Cất hàng: gợi ý vị trí theo zone, sức chứa, cất một phần, báo vị trí đầy hoặc sai | `feature/inbound` | P1 |
 | B-08 | Client cho `nv-nhan` và `nv-cat` | `feature/inbound` | P1 |
+| B-09 | Kiểm kê (chuyển từ D-06): phiếu, khóa vị trí, snapshot, đếm mù, so với Z, đếm lại tới giới hạn, tự đóng phiếu | `feature/cycle-count` | P1 |
+| B-10 | Client cho `nv-kiemke` (chuyển từ D-08) | `feature/cycle-count` | P1 |
 
 ### 8.4 Thành viên C
 
@@ -407,9 +416,7 @@ Quy ước: Ưu tiên P1 = bắt buộc cho demo, P2 = nên có, P3 = nếu còn
 | D-03 | Engine phê duyệt: tính tầng theo Z, X, Y và người lập, D1 đến D3, SoD, lịch sử, khóa phiếu đang mở, leo thang khi quá SLA (kích hoạt tay trong demo) | `feature/approvals` | P1 |
 | D-04 | Thủ kho duyệt: hàng chờ, chênh lệch nhận, chênh lệch kiểm kê, yêu cầu đếm lại, chuyển D2, đề xuất điều chỉnh (TK-3.1 đến TK-4.4) | `feature/approvals` | P1 |
 | D-05 | Quản lý và BGĐ duyệt D2, D3; thực thi sau duyệt (ghi tồn qua `inventory`, đẩy ERP mock) (QL-7.1 đến QL-7.6) | `feature/approvals` | P1 |
-| D-06 | Kiểm kê: phiếu, khóa vị trí, snapshot, đếm mù, so với Z, đếm lại tới giới hạn, tự đóng phiếu | `feature/cycle-count` | P1 |
-| D-07 | Dashboard cơ bản: thẻ số task (TK-2.1), tồn, đơn trong ngày cho BGĐ; cảnh báo đơn giản trong app | `feature/dashboard` | P2 |
-| D-08 | Client cho `thukho`, `quanly`, `bgd`, `nv-kiemke` | các nhánh của D | P1 |
+| D-08 | Client cho `thukho` và `quanly` | `feature/tasks`, `feature/approvals` | P1 |
 
 ## 9. Tiêu chí hoàn thành (Definition of Done)
 
