@@ -6,6 +6,68 @@ ABEST WMS (Warehouse Management System) là hệ thống quản lý kho được
 
 ---
 
+## Nhóm và phân công
+
+| Thành viên | GitHub | Module phụ trách | Nhánh làm việc |
+| :--- | :--- | :--- | :--- |
+| **Đoàn Duy Bình (Leader)** | `@binhdoan0201` | `core`, `auth`, `inventory`, `integrations`, `master_data`, `dashboard` | `feature/core-auth`, `feature/inventory`, `feature/integrations-mock`, `feature/master-data`, `feature/dashboard` |
+| **Mai Hữu Phước** | `@HuuPhuoc1235` | `inbound`, `cycle_count` | `feature/inbound`, `feature/cycle-count` |
+| **Hồ Quốc Cường** | `@quoccuong1108` | `outbound` | `feature/outbound` |
+| **Nguyễn Đức Hiếu** | `@hieunguyen201104` | `tasks`, `approvals` | `feature/tasks`, `feature/approvals` |
+
+Chi tiết đầy đủ bảng phân công từng mã việc và ràng buộc phụ thuộc xem tại [docs/PHAN_CONG.md](docs/PHAN_CONG.md).
+
+---
+
+## Bắt đầu nhanh cho thành viên
+
+Quy trình thiết lập môi trường và bắt đầu phát triển cho thành viên nhóm:
+
+1. **Clone kho lưu trữ và chuyển nhánh develop:**
+   ```bash
+   git clone https://github.com/binhdoan0201/abest-wms.git
+   cd abest-wms
+   git checkout develop
+   ```
+
+2. **Sao chép cấu hình môi trường:**
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Cài đặt môi trường ảo và thư viện:**
+   ```bash
+   make install
+   # Trên Windows: .\make.bat install
+   ```
+
+4. **Khởi động CSDL PostgreSQL và nạp dữ liệu mẫu:**
+   ```bash
+   docker compose up -d
+   make db-reset
+   # Trên Windows: .\make.bat db-reset
+   ```
+
+5. **Chuyển sang nhánh tính năng được phân công:**
+   ```bash
+   # Lấy nhánh từ remote và bắt đầu làm việc (ví dụ nhánh inbound):
+   git checkout feature/inbound
+   ```
+
+6. **Đọc tài liệu hợp đồng API và kiểm tra chất lượng mã nguồn:**
+   - Xem hợp đồng API của module tại thư mục `docs/api/`:
+     - Phước: [docs/api/inbound.md](docs/api/inbound.md), [docs/api/cycle_count.md](docs/api/cycle_count.md)
+     - Cường: [docs/api/outbound.md](docs/api/outbound.md)
+     - Hiếu: [docs/api/tasks.md](docs/api/tasks.md), [docs/api/approvals.md](docs/api/approvals.md)
+     - Bình: [docs/api/auth.md](docs/api/auth.md), [docs/api/inventory.md](docs/api/inventory.md), [docs/api/master_data.md](docs/api/master_data.md), [docs/api/dashboard.md](docs/api/dashboard.md), [docs/api/integrations.md](docs/api/integrations.md)
+   - Kiểm tra mã nguồn trước khi mở PR:
+     ```bash
+     make ci
+     # Trên Windows: .\make.bat ci
+     ```
+
+---
+
 ## 1. Yêu cầu hệ thống
 - **Hệ điều hành:** Linux, macOS, hoặc Windows
 - **Python:** Phiên bản 3.11 trở lên (khuyến nghị 3.12)
