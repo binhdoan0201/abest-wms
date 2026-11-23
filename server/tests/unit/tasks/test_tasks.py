@@ -507,8 +507,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
         assert res_rej.status_code == 200, res_rej.text
         version = res_rej.json()["data"]["version_no"]
 
-        # 4. POST /reassign sang quanly (trên task QUAN_LY_CHUNG) và accept + complete trên task
-        CAT_HANG
+        # 4. POST /reassign sang quanly (trên task QUAN_LY_CHUNG) và accept + complete trên task CAT_HANG
         res_re = client.post(
             f"{BASE}/{task_id}/assign",
             headers=thukho,
