@@ -1,32 +1,38 @@
 """ABEST WMS - Tầng Nghiệp vụ (Service) cho Phân hệ Nhiệm vụ (Tasks).
 
-Triển khai bản tối thiểu chạy được cho các hàm:
+Triển khai đầy đủ các nghiệp vụ:
 - create_task
-- assign_task
+- assign_task (kiểm tra giới hạn tối đa 3 task mở/nhân viên)
 - accept_task
 - reject_task
 - complete_task
-Kiểm tra luồng trạng thái hợp lệ và kiểm soát đồng thời qua version_no.
+- reassign_task (điều chuyển task sang nhân viên khác)
+- cancel_task (hủy task chưa hoàn tất)
+Kiểm tra luồng trạng thái hợp lệ, khóa dòng đồng thời và version_no.
 """
 
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from server.app.core.audit import create_audit_log
-from server.app.core.exceptions import BusinessError
+from server.app.core.exceptions import BusinessError, translate_db_error
 from server.app.modules.tasks.models import Task
 from server.app.modules.tasks.repositories import TaskRepository
 from server.app.modules.tasks.schemas import (
     AcceptTaskRequest,
     AssignTaskRequest,
+    CancelTaskRequest,
     CompleteTaskRequest,
     CreateTaskRequest,
     RejectTaskRequest,
     TaskResponse,
 )
+
+MAX_OPEN_TASKS_PER_USER = 3
 
 
 def _task_to_schema(t: Task) -> TaskResponse:
@@ -56,10 +62,6 @@ def _task_to_schema(t: Task) -> TaskResponse:
 class TaskService:
     """Service điều phối vòng đời nhiệm vụ trong kho."""
 
-    # TODO (Chủ module D): Tự động giao task theo kỹ năng, chứng chỉ và tải công việc
-    # TODO (Chủ module D): Cảnh báo và leo thang SLA tự động (sla_due_at)
-    # TODO (Chủ module D): Điều chuyển task qua khu vực (reassign) giữa các nhân viên
-
     @staticmethod
     def create_task(
         db: Session,
@@ -80,7 +82,10 @@ class TaskService:
             status="UNASSIGNED",
             version_no=1,
         )
-        saved_task = TaskRepository.create_task(db, task)
+        try:
+            saved_task = TaskRepository.create_task(db, task)
+        except IntegrityError as exc:
+            raise translate_db_error(exc) from exc
 
         create_audit_log(
             db,
@@ -101,7 +106,7 @@ class TaskService:
         req: AssignTaskRequest,
     ) -> TaskResponse:
         """Giao nhiệm vụ cho nhân viên (chuyển sang ASSIGNED)."""
-        task = TaskRepository.get_task_by_id(db, task_id)
+        task = TaskRepository.get_task_by_id(db, task_id, for_update=True)
         if not task:
             raise BusinessError(
                 code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404
@@ -122,11 +127,22 @@ class TaskService:
                 http_status=409,
             )
 
+        open_count = TaskRepository.count_open_tasks_for_user(
+            db, req.assigned_to, task.warehouse_id
+        )
+        if open_count >= MAX_OPEN_TASKS_PER_USER:
+            raise BusinessError(
+                code="TASKS_MAX_OPEN_EXCEEDED",
+                message=f"Nhân viên đang giữ tối đa {MAX_OPEN_TASKS_PER_USER} nhiệm vụ mở",
+                http_status=409,
+            )
+
         task.assigned_to = req.assigned_to
         task.assigned_by = assigner_id
         task.status = "ASSIGNED"
         task.rejection_reason = None
         task.version_no += 1
+        db.flush()
 
         create_audit_log(
             db,
@@ -147,7 +163,7 @@ class TaskService:
         req: AcceptTaskRequest,
     ) -> TaskResponse:
         """Nhân viên nhận nhiệm vụ (chuyển sang IN_PROGRESS)."""
-        task = TaskRepository.get_task_by_id(db, task_id)
+        task = TaskRepository.get_task_by_id(db, task_id, for_update=True)
         if not task:
             raise BusinessError(
                 code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404
@@ -181,6 +197,7 @@ class TaskService:
         task.status = "IN_PROGRESS"
         task.started_at = datetime.now(timezone.utc)
         task.version_no += 1
+        db.flush()
 
         create_audit_log(
             db,
@@ -201,7 +218,7 @@ class TaskService:
         req: RejectTaskRequest,
     ) -> TaskResponse:
         """Nhân viên từ chối nhiệm vụ kèm lý do (chuyển sang REJECTED)."""
-        task = TaskRepository.get_task_by_id(db, task_id)
+        task = TaskRepository.get_task_by_id(db, task_id, for_update=True)
         if not task:
             raise BusinessError(
                 code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404
@@ -235,6 +252,7 @@ class TaskService:
         task.status = "REJECTED"
         task.rejection_reason = req.rejection_reason
         task.version_no += 1
+        db.flush()
 
         create_audit_log(
             db,
@@ -255,7 +273,7 @@ class TaskService:
         req: CompleteTaskRequest,
     ) -> TaskResponse:
         """Hoàn tất nhiệm vụ (chuyển sang COMPLETED, tiến độ 100%)."""
-        task = TaskRepository.get_task_by_id(db, task_id)
+        task = TaskRepository.get_task_by_id(db, task_id, for_update=True)
         if not task:
             raise BusinessError(
                 code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404
@@ -292,6 +310,7 @@ class TaskService:
         if req.completed_qty is not None:
             task.completed_qty = req.completed_qty
         task.version_no += 1
+        db.flush()
 
         create_audit_log(
             db,
@@ -305,11 +324,117 @@ class TaskService:
         return _task_to_schema(task)
 
     @staticmethod
+    def reassign_task(
+        db: Session,
+        task_id: uuid.UUID,
+        assigner_id: uuid.UUID,
+        req: AssignTaskRequest,
+    ) -> TaskResponse:
+        """Điều chuyển nhiệm vụ sang nhân viên khác."""
+        task = TaskRepository.get_task_by_id(db, task_id, for_update=True)
+        if not task:
+            raise BusinessError(
+                code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404
+            )
+
+        if req.version_no != task.version_no:
+            raise BusinessError(
+                code="VERSION_CONFLICT",
+                message="Nhiệm vụ đã được cập nhật bởi thao tác khác",
+                http_status=409,
+                details={"current_version_no": task.version_no},
+            )
+
+        if task.status in ("COMPLETED", "CANCELLED"):
+            raise BusinessError(
+                code="INVALID_STATE",
+                message=f"Không thể điều chuyển nhiệm vụ đang ở trạng thái `{task.status}`",
+                http_status=409,
+            )
+
+        open_count = TaskRepository.count_open_tasks_for_user(
+            db, req.assigned_to, task.warehouse_id
+        )
+        if open_count >= MAX_OPEN_TASKS_PER_USER:
+            raise BusinessError(
+                code="TASKS_MAX_OPEN_EXCEEDED",
+                message=f"Nhân viên nhận việc đã đạt tối đa {MAX_OPEN_TASKS_PER_USER} nhiệm vụ mở",
+                http_status=409,
+            )
+
+        old_assignee = str(task.assigned_to) if task.assigned_to else None
+        task.assigned_to = req.assigned_to
+        task.assigned_by = assigner_id
+        task.status = "ASSIGNED"
+        task.rejection_reason = None
+        task.version_no += 1
+        db.flush()
+
+        create_audit_log(
+            db,
+            action_code="TASK_REASSIGN",
+            entity_name="tasks",
+            actor_user_id=assigner_id,
+            warehouse_id=task.warehouse_id,
+            entity_id=task.task_id,
+            old_values={"assigned_to": old_assignee},
+            new_values={"assigned_to": str(req.assigned_to), "status": "ASSIGNED"},
+        )
+        return _task_to_schema(task)
+
+    @staticmethod
+    def cancel_task(
+        db: Session,
+        task_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        req: CancelTaskRequest,
+    ) -> TaskResponse:
+        """Hủy nhiệm vụ chưa hoàn tất."""
+        task = TaskRepository.get_task_by_id(db, task_id, for_update=True)
+        if not task:
+            raise BusinessError(
+                code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404
+            )
+
+        if req.version_no != task.version_no:
+            raise BusinessError(
+                code="VERSION_CONFLICT",
+                message="Nhiệm vụ đã được cập nhật bởi thao tác khác",
+                http_status=409,
+                details={"current_version_no": task.version_no},
+            )
+
+        if task.status in ("COMPLETED", "CANCELLED"):
+            raise BusinessError(
+                code="INVALID_STATE",
+                message=f"Không thể hủy nhiệm vụ đang ở trạng thái `{task.status}`",
+                http_status=409,
+            )
+
+        task.status = "CANCELLED"
+        if req.reason:
+            task.rejection_reason = req.reason
+        task.version_no += 1
+        db.flush()
+
+        create_audit_log(
+            db,
+            action_code="TASK_CANCEL",
+            entity_name="tasks",
+            actor_user_id=actor_id,
+            warehouse_id=task.warehouse_id,
+            entity_id=task.task_id,
+            new_values={"status": "CANCELLED", "reason": req.reason},
+        )
+        return _task_to_schema(task)
+
+    @staticmethod
     def get_tasks(
         db: Session,
         warehouse_id: uuid.UUID,
         worker_id: uuid.UUID | None = None,
         status: str | None = None,
+        queue_only: bool = False,
     ) -> list[TaskResponse]:
         """Lấy danh sách nhiệm vụ."""
         tasks = TaskRepository.get_tasks(
@@ -317,6 +442,7 @@ class TaskService:
             warehouse_id=warehouse_id,
             assigned_to=worker_id,
             status=status,
+            queue_only=queue_only,
         )
         return [_task_to_schema(t) for t in tasks]
 
@@ -337,3 +463,5 @@ assign_task = TaskService.assign_task
 accept_task = TaskService.accept_task
 reject_task = TaskService.reject_task
 complete_task = TaskService.complete_task
+reassign_task = TaskService.reassign_task
+cancel_task = TaskService.cancel_task

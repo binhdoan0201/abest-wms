@@ -19,7 +19,7 @@ class CreateTaskRequest(BaseModel):
 
 
 class AssignTaskRequest(BaseModel):
-    """Dữ liệu yêu cầu giao nhiệm vụ cho nhân viên."""
+    """Dữ liệu yêu cầu giao hoặc điều chuyển nhiệm vụ cho nhân viên."""
 
     assigned_to: uuid.UUID = Field(..., description="ID nhân viên được giao")
     version_no: int = Field(..., description="Phiên bản lạc quan hiện tại")
@@ -42,6 +42,13 @@ class CompleteTaskRequest(BaseModel):
     """Dữ liệu yêu cầu hoàn tất nhiệm vụ."""
 
     completed_qty: Decimal | None = None
+    version_no: int = Field(..., description="Phiên bản lạc quan hiện tại")
+
+
+class CancelTaskRequest(BaseModel):
+    """Dữ liệu yêu cầu hủy nhiệm vụ."""
+
+    reason: str | None = Field(None, description="Lý do hủy nhiệm vụ")
     version_no: int = Field(..., description="Phiên bản lạc quan hiện tại")
 
 

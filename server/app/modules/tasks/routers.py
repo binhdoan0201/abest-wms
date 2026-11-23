@@ -8,6 +8,8 @@ Khai báo các endpoint theo Mục 4.7 Chuẩn API:
 - POST /tasks/{id}/accept (nhân viên được giao)
 - POST /tasks/{id}/reject (nhân viên được giao)
 - POST /tasks/{id}/complete (nhân viên được giao)
+- POST /tasks/{id}/reassign (thukho, quanly)
+- POST /tasks/{id}/cancel (thukho, quanly)
 """
 
 import uuid
@@ -22,6 +24,7 @@ from server.app.core.responses import success_response
 from server.app.modules.tasks.schemas import (
     AcceptTaskRequest,
     AssignTaskRequest,
+    CancelTaskRequest,
     CompleteTaskRequest,
     CreateTaskRequest,
     RejectTaskRequest,
@@ -44,16 +47,18 @@ def get_tasks(
     """Danh sách nhiệm vụ.
 
     Nhân viên thực thi chỉ thấy nhiệm vụ của mình.
-    Thủ kho, Quản lý có thể xem tất cả trong kho.
+    Thủ kho, Quản lý có thể xem tất cả hoặc hàng đợi (queue) trong kho.
     """
     if not user_ctx.warehouse_id:
         raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
 
-    # Nhân viên thực thi luôn bị giới hạn chỉ thấy task của chính mình
+    queue_only = False
     if user_ctx.role_code in WORKER_ROLES or scope == "mine":
         worker_filter: uuid.UUID | None = user_ctx.user_id
     elif user_ctx.role_code in SUPERVISOR_ROLES:
         worker_filter = None
+        if scope == "queue":
+            queue_only = True
     else:
         raise BusinessError(code="FORBIDDEN", message="Không có quyền truy cập", http_status=403)
 
@@ -62,6 +67,7 @@ def get_tasks(
         warehouse_id=user_ctx.warehouse_id,
         worker_id=worker_filter,
         status=status,
+        queue_only=queue_only,
     )
     return success_response(data=[t.model_dump() for t in tasks], total=len(tasks))
 
@@ -77,7 +83,6 @@ def get_task_detail(
     if not user_ctx.warehouse_id or task.warehouse_id != user_ctx.warehouse_id:
         raise BusinessError(code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404)
 
-    # Nhân viên thực thi chỉ được xem task được giao cho mình
     if user_ctx.role_code in WORKER_ROLES and task.assigned_to != user_ctx.user_id:
         raise BusinessError(
             code="FORBIDDEN", message="Không có quyền xem nhiệm vụ này", http_status=403
@@ -188,22 +193,42 @@ def complete_task_endpoint(
 @router.post("/{task_id}/reassign", summary="Điều chuyển nhiệm vụ sang nhân viên/khu vực khác")
 def reassign_task_endpoint(
     task_id: uuid.UUID,
+    req: AssignTaskRequest,
     user_ctx: UserContext = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Điều chuyển nhiệm vụ (TODO: chủ module hoàn thiện ở pha sau)."""
-    raise BusinessError(
-        code="NOT_IMPLEMENTED", message="Chức năng đang phát triển", http_status=501
+    """Điều chuyển nhiệm vụ sang nhân viên khác (Thủ kho, Quản lý)."""
+    if user_ctx.role_code not in SUPERVISOR_ROLES:
+        raise BusinessError(
+            code="FORBIDDEN", message="Không có quyền điều chuyển nhiệm vụ", http_status=403
+        )
+
+    task = TaskService.reassign_task(
+        db=db,
+        task_id=task_id,
+        assigner_id=user_ctx.user_id,
+        req=req,
     )
+    return success_response(data=task.model_dump())
 
 
 @router.post("/{task_id}/cancel", summary="Hủy nhiệm vụ")
 def cancel_task_endpoint(
     task_id: uuid.UUID,
+    req: CancelTaskRequest,
     user_ctx: UserContext = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Hủy nhiệm vụ (TODO: chủ module hoàn thiện ở pha sau)."""
-    raise BusinessError(
-        code="NOT_IMPLEMENTED", message="Chức năng đang phát triển", http_status=501
+    """Hủy nhiệm vụ chưa hoàn tất (Thủ kho, Quản lý)."""
+    if user_ctx.role_code not in SUPERVISOR_ROLES:
+        raise BusinessError(
+            code="FORBIDDEN", message="Không có quyền hủy nhiệm vụ", http_status=403
+        )
+
+    task = TaskService.cancel_task(
+        db=db,
+        task_id=task_id,
+        actor_id=user_ctx.user_id,
+        req=req,
     )
+    return success_response(data=task.model_dump())
