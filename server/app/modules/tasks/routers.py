@@ -136,6 +136,7 @@ def assign_task_endpoint(
         task_id=task_id,
         assigner_id=user_ctx.user_id,
         req=req,
+        warehouse_id=user_ctx.warehouse_id,
     )
     return success_response(data=task.model_dump())
 
@@ -153,6 +154,7 @@ def accept_task_endpoint(
         task_id=task_id,
         worker_id=user_ctx.user_id,
         req=req,
+        warehouse_id=user_ctx.warehouse_id,
     )
     return success_response(data=task.model_dump())
 
@@ -170,6 +172,7 @@ def reject_task_endpoint(
         task_id=task_id,
         worker_id=user_ctx.user_id,
         req=req,
+        warehouse_id=user_ctx.warehouse_id,
     )
     return success_response(data=task.model_dump())
 
@@ -187,6 +190,7 @@ def complete_task_endpoint(
         task_id=task_id,
         worker_id=user_ctx.user_id,
         req=req,
+        warehouse_id=user_ctx.warehouse_id,
     )
     return success_response(data=task.model_dump())
 
@@ -209,6 +213,7 @@ def reassign_task_endpoint(
         task_id=task_id,
         assigner_id=user_ctx.user_id,
         req=req,
+        warehouse_id=user_ctx.warehouse_id,
     )
     return success_response(data=task.model_dump())
 
@@ -231,5 +236,6 @@ def cancel_task_endpoint(
         task_id=task_id,
         actor_id=user_ctx.user_id,
         req=req,
+        warehouse_id=user_ctx.warehouse_id,
     )
     return success_response(data=task.model_dump())
