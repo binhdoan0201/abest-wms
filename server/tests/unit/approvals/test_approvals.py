@@ -1,8 +1,9 @@
-"""Unit tests cho module approvals (D-03, D-04, D-05)."""
+"""Unit & DB integration tests cho module approvals (D-03, D-04, D-05)."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,11 +14,17 @@ from server.app.core.database import SessionLocal
 from server.app.core.exceptions import BusinessError
 from server.app.core.rbac import UserContext
 from server.app.main import app
-from server.app.modules.approvals import create_approval_request, services
+from server.app.modules.approvals import (
+    create_approval_request,
+    resubmit_approval_info,
+    services,
+    supersede_approval_for_recount,
+)
 from server.app.modules.approvals.schemas import (
     ApproveDecisionRequest,
-    RejectDecisionRequest,
+    EscalateTierRequest,
     RequestInfoDecisionRequest,
+    StockAdjustmentProposalCreate,
 )
 
 client = TestClient(app)
@@ -33,7 +40,6 @@ def _login(username: str) -> str:
 
 
 def _get_user_by_role(db: Session, role_code: str) -> tuple[str, UserContext]:
-    """Lấy username và UserContext từ tài khoản seed theo role_code."""
     row = (
         db.execute(
             text(
@@ -55,19 +61,40 @@ def _get_user_by_role(db: Session, role_code: str) -> tuple[str, UserContext]:
         username=str(row["username"]),
         role_code=row["role_code"],
         warehouse_id=row["primary_warehouse_id"],
-        permissions=set(),
+        permissions={},
     )
     return str(row["username"]), ctx
 
 
-def test_tier_resolution_and_sod_violation() -> None:
-    """Kiểm tra phân luồng tầng duyệt (Z, D1, D2, D3) và chặn SoD người lập tự duyệt."""
+def _get_seed_location_sku_and_reason(
+    db: Session, warehouse_id: uuid.UUID
+) -> tuple[uuid.UUID, uuid.UUID, str]:
+    loc_id = db.execute(
+        text(
+            """
+            SELECT location_id FROM locations
+            WHERE warehouse_id = :wh AND is_active = TRUE
+            LIMIT 1
+            """
+        ),
+        {"wh": warehouse_id},
+    ).scalar_one()
+    sku_id = db.execute(text("SELECT sku_id FROM skus WHERE is_active = TRUE LIMIT 1")).scalar_one()
+    reason_code = db.execute(
+        text("SELECT reason_code FROM reason_codes WHERE is_active = TRUE LIMIT 1")
+    ).scalar_one()
+    return loc_id, sku_id, str(reason_code)
+
+
+def test_tier_resolution_escalate_d2_and_sod_violation() -> None:
     db = SessionLocal()
     try:
         _, nv_nhan = _get_user_by_role(db, "nv-nhan")
         _, thukho = _get_user_by_role(db, "thukho")
+        _, quanly = _get_user_by_role(db, "quanly")
+        assert nv_nhan.warehouse_id is not None
+        assert thukho.warehouse_id is not None
 
-        # 1. Trong dung sai Z (kiểm kê 100k <= 500k) -> trả None
         auto_z = create_approval_request(
             db=db,
             warehouse_id=nv_nhan.warehouse_id,
@@ -80,7 +107,6 @@ def test_tier_resolution_and_sod_violation() -> None:
         )
         assert auto_z is None
 
-        # 2. Lệch 2.000.000 <= X (5.000.000) do nv-nhan lập -> lên D1_THUKHO
         req_d1 = create_approval_request(
             db=db,
             warehouse_id=nv_nhan.warehouse_id,
@@ -94,8 +120,31 @@ def test_tier_resolution_and_sod_violation() -> None:
         assert req_d1.current_tier == "D1_THUKHO"
         assert req_d1.status == "PENDING_D1"
 
-        # 3. Thủ kho lập phiếu 3.000.000 -> bỏ qua D1, lên thẳng D2_QUANLY
-        req_d2 = create_approval_request(
+        escalated = services.escalate_to_next_tier(
+            db=db,
+            user_ctx=thukho,
+            approval_id=req_d1.approval_id,
+            req=EscalateTierRequest(
+                recommendation_or_reason="Chuyển Quản lý kho xem xét chênh lệch lô nhạy cảm",
+                version_no=1,
+            ),
+        )
+        assert escalated.current_tier == "D2_QUANLY"
+        assert escalated.status == "PENDING_D2"
+        assert escalated.version_no == 2
+
+        approved_d2 = services.approve_request(
+            db=db,
+            user_ctx=quanly,
+            approval_id=req_d1.approval_id,
+            req=ApproveDecisionRequest(
+                recommendation_or_reason="Quản lý đồng ý duyệt",
+                version_no=2,
+            ),
+        )
+        assert approved_d2.status == "APPROVED"
+
+        req_sod = create_approval_request(
             db=db,
             warehouse_id=thukho.warehouse_id,
             object_type="STOCK_ADJUSTMENT",
@@ -104,15 +153,14 @@ def test_tier_resolution_and_sod_violation() -> None:
             discrepancy_amount=Decimal("3000000"),
             force_review=True,
         )
-        assert req_d2 is not None
-        assert req_d2.current_tier == "D2_QUANLY"
+        assert req_sod is not None
+        assert req_sod.current_tier == "D2_QUANLY"
 
-        # 4. Vi phạm SoD: chính người lập duyệt phiếu của mình -> 403 SOD_VIOLATION
         with pytest.raises(BusinessError) as exc_info:
             services.approve_request(
                 db=db,
                 user_ctx=thukho,
-                approval_id=req_d2.approval_id,
+                approval_id=req_sod.approval_id,
                 req=ApproveDecisionRequest(version_no=1),
             )
         assert exc_info.value.code == "SOD_VIOLATION"
@@ -122,15 +170,13 @@ def test_tier_resolution_and_sod_violation() -> None:
         db.close()
 
 
-def test_approve_reauth_version_conflict_and_escalate() -> None:
-    """Kiểm tra xác thực lại (>=10tr), xung đột version_no (409) và leo thang SLA."""
+def test_approve_reauth_password_version_conflict_and_escalate() -> None:
     db = SessionLocal()
     try:
         _, nv_nhan = _get_user_by_role(db, "nv-nhan")
-        _, thukho = _get_user_by_role(db, "thukho")
         _, quanly = _get_user_by_role(db, "quanly")
+        assert nv_nhan.warehouse_id is not None
 
-        # Tạo phiếu 12.000.000 (> ngưỡng X=5tr và >= ngưỡng xác thực lại 10tr)
         req = create_approval_request(
             db=db,
             warehouse_id=nv_nhan.warehouse_id,
@@ -141,21 +187,21 @@ def test_approve_reauth_version_conflict_and_escalate() -> None:
             force_review=True,
         )
         assert req is not None
-        # Vượt ngưỡng X nên DB xếp thẳng vào D2_QUANLY
         assert req.current_tier == "D2_QUANLY"
 
-        # Sai version_no -> 409 VERSION_CONFLICT
         with pytest.raises(BusinessError) as exc_ver:
             services.approve_request(
                 db=db,
                 user_ctx=quanly,
                 approval_id=req.approval_id,
-                req=ApproveDecisionRequest(reauth_method="PASSWORD", version_no=99),
+                req=ApproveDecisionRequest(
+                    reauth_method="PASSWORD",
+                    reauth_password="Demo@123456",
+                    version_no=99,
+                ),
             )
         assert exc_ver.value.code == "VERSION_CONFLICT"
-        assert exc_ver.value.http_status == 409
 
-        # Thiếu reauth_method khi giá trị >= 10tr -> 403 REAUTH_REQUIRED
         with pytest.raises(BusinessError) as exc_reauth:
             services.approve_request(
                 db=db,
@@ -165,21 +211,33 @@ def test_approve_reauth_version_conflict_and_escalate() -> None:
             )
         assert exc_reauth.value.code == "REAUTH_REQUIRED"
 
-        # Duyệt thành công khi có reauth_method
+        with pytest.raises(BusinessError) as exc_bad_pw:
+            services.approve_request(
+                db=db,
+                user_ctx=quanly,
+                approval_id=req.approval_id,
+                req=ApproveDecisionRequest(
+                    reauth_method="PASSWORD",
+                    reauth_password="WrongPass@123",
+                    version_no=1,
+                ),
+            )
+        assert exc_bad_pw.value.code == "REAUTH_FAILED"
+
         approved = services.approve_request(
             db=db,
             user_ctx=quanly,
             approval_id=req.approval_id,
             req=ApproveDecisionRequest(
                 recommendation_or_reason="Đã kiểm tra chứng từ",
-                reauth_method="BIOMETRIC",
+                reauth_method="PASSWORD",
+                reauth_password="Demo@123456",
                 version_no=1,
             ),
         )
         assert approved.status == "APPROVED"
         assert approved.version_no == 2
 
-        # Tạo phiếu quá hạn SLA ở D1 và test leo thang
         overdue = create_approval_request(
             db=db,
             warehouse_id=nv_nhan.warehouse_id,
@@ -198,9 +256,116 @@ def test_approve_reauth_version_conflict_and_escalate() -> None:
         db.refresh(overdue)
         assert overdue.current_tier == "D2_QUANLY"
         assert overdue.status == "PENDING_D2"
+    finally:
+        db.rollback()
+        db.close()
 
-        # Test reject & request_info trên phiếu khác
-        req_reject = create_approval_request(
+
+def test_stock_adjustment_and_scrap_post_approval_execution() -> None:
+    db = SessionLocal()
+    try:
+        _, thukho = _get_user_by_role(db, "thukho")
+        _, quanly = _get_user_by_role(db, "quanly")
+        assert thukho.warehouse_id is not None
+        loc_id, sku_id, reason_code = _get_seed_location_sku_and_reason(db, thukho.warehouse_id)
+
+        adj_approval = services.propose_stock_adjustment(
+            db=db,
+            user_ctx=thukho,
+            req=StockAdjustmentProposalCreate(
+                adjustment_type="ADJUSTMENT",
+                location_id=loc_id,
+                sku_id=sku_id,
+                qty_adjustment=Decimal("5.000"),
+                reason_code=reason_code,
+            ),
+        )
+        assert adj_approval.object_type == "STOCK_ADJUSTMENT"
+        assert adj_approval.current_tier == "D2_QUANLY"
+
+        with (
+            patch(
+                "server.app.modules.approvals.services.apply_movement",
+                side_effect=BusinessError(
+                    code="INVENTORY_INSUFFICIENT_QTY",
+                    message="Tồn kho không đủ để điều chỉnh giảm",
+                    http_status=409,
+                ),
+            ),
+            pytest.raises(BusinessError),
+        ):
+            with db.begin_nested():
+                services.approve_request(
+                    db=db,
+                    user_ctx=quanly,
+                    approval_id=adj_approval.approval_id,
+                    req=ApproveDecisionRequest(
+                        reauth_method="PASSWORD",
+                        reauth_password="Demo@123456",
+                        version_no=1,
+                    ),
+                )
+
+        db.refresh(adj_approval)
+        assert adj_approval.status == "PENDING_D2"
+        assert adj_approval.version_no == 1
+
+        approved_adj = services.approve_request(
+            db=db,
+            user_ctx=quanly,
+            approval_id=adj_approval.approval_id,
+            req=ApproveDecisionRequest(
+                reauth_method="PASSWORD",
+                reauth_password="Demo@123456",
+                version_no=1,
+            ),
+        )
+        assert approved_adj.status == "APPROVED"
+        assert approved_adj.execution_status == "EXECUTED_INVENTORY"
+
+        sync_count = db.execute(
+            text("SELECT COUNT(*) FROM integration_sync_logs WHERE doc_id = :doc_id"),
+            {"doc_id": adj_approval.object_id},
+        ).scalar_one()
+        assert int(sync_count) == 1
+
+        scrap_approval = services.propose_stock_adjustment(
+            db=db,
+            user_ctx=thukho,
+            req=StockAdjustmentProposalCreate(
+                adjustment_type="SCRAP",
+                location_id=loc_id,
+                sku_id=sku_id,
+                qty_adjustment=Decimal("-2.000"),
+                reason_code=reason_code,
+            ),
+        )
+        approved_scrap = services.approve_request(
+            db=db,
+            user_ctx=quanly,
+            approval_id=scrap_approval.approval_id,
+            req=ApproveDecisionRequest(
+                reauth_method="PASSWORD",
+                reauth_password="Demo@123456",
+                version_no=1,
+            ),
+        )
+        assert approved_scrap.status == "APPROVED"
+        assert approved_scrap.execution_status == "WAITING_SCRAP_EXECUTION"
+    finally:
+        db.rollback()
+        db.close()
+
+
+def test_lock_tier_guard_and_need_info_lifecycle() -> None:
+    db = SessionLocal()
+    try:
+        _, nv_nhan = _get_user_by_role(db, "nv-nhan")
+        _, thukho = _get_user_by_role(db, "thukho")
+        _, quanly = _get_user_by_role(db, "quanly")
+        assert nv_nhan.warehouse_id is not None
+
+        req = create_approval_request(
             db=db,
             warehouse_id=nv_nhan.warehouse_id,
             object_type="GRN_DISCREPANCY",
@@ -209,36 +374,77 @@ def test_approve_reauth_version_conflict_and_escalate() -> None:
             discrepancy_amount=Decimal("1500000"),
             force_review=True,
         )
-        assert req_reject is not None
+        assert req is not None
+        assert req.current_tier == "D1_THUKHO"
+
+        with pytest.raises(BusinessError) as exc_wrong_tier:
+            services.get_approval_detail(
+                db=db,
+                user_ctx=quanly,
+                approval_id=req.approval_id,
+                acquire_lock=True,
+            )
+        assert exc_wrong_tier.value.http_status == 403
+        assert req.locked_by_viewer_id is None
+
+        detail_req, _ = services.get_approval_detail(
+            db=db,
+            user_ctx=thukho,
+            approval_id=req.approval_id,
+            acquire_lock=True,
+        )
+        assert detail_req.locked_by_viewer_id == thukho.user_id
+
+        unlocked = services.unlock_approval(db=db, user_ctx=thukho, approval_id=req.approval_id)
+        assert unlocked.locked_by_viewer_id is None
+
         info_req = services.request_more_info(
             db=db,
             user_ctx=thukho,
-            approval_id=req_reject.approval_id,
+            approval_id=req.approval_id,
             req=RequestInfoDecisionRequest(
-                info_required_note="Đề nghị đếm lại lần 2",
-                request_recount=True,
+                info_required_note="Bổ sung ảnh biên bản giao nhận",
+                request_recount=False,
                 version_no=1,
             ),
         )
         assert info_req.status == "NEED_INFO"
 
-        rejected = services.reject_request(
+        resubmitted = resubmit_approval_info(
+            db=db,
+            approval_id=req.approval_id,
+            warehouse_id=nv_nhan.warehouse_id,
+            actor_user_id=nv_nhan.user_id,
+            note="Đã đính kèm biên bản có chữ ký tài xế",
+        )
+        assert resubmitted.status == "PENDING_D1"
+        assert resubmitted.version_no == 3
+
+        recount_req = services.request_more_info(
             db=db,
             user_ctx=thukho,
-            approval_id=req_reject.approval_id,
-            req=RejectDecisionRequest(
-                rejection_reason="Không khớp biên bản giao nhận",
-                version_no=2,
+            approval_id=req.approval_id,
+            req=RequestInfoDecisionRequest(
+                info_required_note="Yêu cầu đếm lại lần 2",
+                request_recount=True,
+                version_no=3,
             ),
         )
-        assert rejected.status == "REJECTED"
+        assert recount_req.status == "NEED_INFO"
+
+        superseded = supersede_approval_for_recount(
+            db=db,
+            approval_id=req.approval_id,
+            warehouse_id=nv_nhan.warehouse_id,
+            actor_user_id=nv_nhan.user_id,
+        )
+        assert superseded.status == "SUPERSEDED"
     finally:
         db.rollback()
         db.close()
 
 
 def test_approvals_endpoints_rbac() -> None:
-    """Thử endpoint với vai trò đúng (thukho, quanly) và vai trò sai (nv-nhan)."""
     db = SessionLocal()
     try:
         thukho_user, _ = _get_user_by_role(db, "thukho")
@@ -251,7 +457,6 @@ def test_approvals_endpoints_rbac() -> None:
     quanly_token = _login(quanly_user)
     worker_token = _login(worker_user)
 
-    # Vai trò đúng: thukho xem hàng chờ -> 200
     resp_ok = client.get(
         "/api/v1/approvals",
         headers={"Authorization": f"Bearer {thukho_token}"},
@@ -259,21 +464,18 @@ def test_approvals_endpoints_rbac() -> None:
     assert resp_ok.status_code == 200
     assert "data" in resp_ok.json()
 
-    # Vai trò sai: nv-nhan xem hàng chờ -> 403 FORBIDDEN
     resp_forbidden = client.get(
         "/api/v1/approvals",
         headers={"Authorization": f"Bearer {worker_token}"},
     )
     assert resp_forbidden.status_code == 403
 
-    # Vai trò sai: thukho gọi escalate-expired (chỉ quanly được gọi) -> 403
     resp_esc_forbidden = client.post(
         "/api/v1/approvals/escalate-expired",
         headers={"Authorization": f"Bearer {thukho_token}"},
     )
     assert resp_esc_forbidden.status_code == 403
 
-    # Vai trò đúng: quanly gọi escalate-expired -> 200
     resp_esc_ok = client.post(
         "/api/v1/approvals/escalate-expired",
         headers={"Authorization": f"Bearer {quanly_token}"},

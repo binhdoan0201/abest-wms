@@ -1,8 +1,4 @@
-"""ABEST WMS - Nghiệp vụ Phân hệ Phê duyệt (Approvals).
-
-Sử dụng Repository pattern kết hợp lời gọi hàm DB fn_resolve_approval_tier và
-fn_escalate_expired_approvals. Thực thi hậu kiểm tồn kho qua inventory.apply_movement.
-"""
+"""ABEST WMS - Nghiệp vụ Phân hệ Phê duyệt (Approvals)."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -17,6 +13,7 @@ from sqlalchemy.orm import Session
 from server.app.core.audit import create_audit_log
 from server.app.core.exceptions import BusinessError, translate_db_error
 from server.app.core.rbac import UserContext
+from server.app.core.security import verify_password
 from server.app.modules.approvals import repositories as repo
 from server.app.modules.approvals.models import (
     ApprovalHistory,
@@ -25,6 +22,7 @@ from server.app.modules.approvals.models import (
 )
 from server.app.modules.approvals.schemas import (
     ApproveDecisionRequest,
+    EscalateTierRequest,
     RejectDecisionRequest,
     RequestInfoDecisionRequest,
     StockAdjustmentProposalCreate,
@@ -35,7 +33,8 @@ PG_OBJECT_TYPE = PG_ENUM(name="approval_object_type", create_type=False)
 PG_TIER_TYPE = PG_ENUM(name="approval_tier_type", create_type=False)
 PG_STATUS_TYPE = PG_ENUM(name="approval_status_type", create_type=False)
 PG_EXEC_STATUS_TYPE = PG_ENUM(name="post_approval_exec_status", create_type=False)
-PG_ADJ_TYPE = PG_ENUM(name="stock_adjustment_type", create_type=False)
+
+LOCK_TIMEOUT_MINUTES = 15
 
 ROLE_TO_TIER: dict[str, str] = {
     "thukho": "D1_THUKHO",
@@ -51,21 +50,51 @@ TIER_TO_PENDING_STATUS: dict[str, str] = {
 
 
 def _cast_enum(value: str, pg_enum: PG_ENUM) -> Any:
-    """Ép kiểu chuỗi Python sang PostgreSQL ENUM tương ứng."""
     return cast(value, pg_enum)
 
 
+def _require_warehouse_id(user_ctx: UserContext) -> uuid.UUID:
+    if user_ctx.warehouse_id is None:
+        raise BusinessError(
+            code="FORBIDDEN",
+            message="Tài khoản hiện tại chưa được gán kho làm việc.",
+            http_status=403,
+        )
+    return user_ctx.warehouse_id
+
+
 def _compute_sla_due(config: dict[str, Any] | None, tier: str) -> datetime:
-    """Tính mốc hạn SLA theo cấu hình kho."""
     default_hours = {"D1_THUKHO": 4, "D2_QUANLY": 8, "D3_BGD": 24}
-    tier_short = tier.split("_")[0]  # D1, D2, D3
+    tier_short = tier.split("_")[0]
     sla_map = (config or {}).get("approval_sla_hours") or {}
     hours = float(sla_map.get(tier_short, default_hours.get(tier, 8)))
     return datetime.now(timezone.utc) + timedelta(hours=hours)
 
 
+def _is_lock_active(approval: ApprovalRequest, now: datetime) -> bool:
+    if approval.locked_by_viewer_id is None or approval.locked_at is None:
+        return False
+    locked_at = approval.locked_at
+    if locked_at.tzinfo is None:
+        locked_at = locked_at.replace(tzinfo=timezone.utc)
+    return (now - locked_at) < timedelta(minutes=LOCK_TIMEOUT_MINUTES)
+
+
+def _ensure_not_locked_by_other(approval: ApprovalRequest, user_id: uuid.UUID) -> None:
+    now = datetime.now(timezone.utc)
+    if (
+        _is_lock_active(approval, now)
+        and approval.locked_by_viewer_id is not None
+        and approval.locked_by_viewer_id != user_id
+    ):
+        raise BusinessError(
+            code="APPROVAL_LOCKED_BY_OTHER",
+            message="Hồ sơ đang được cán bộ duyệt khác mở xử lý.",
+            http_status=409,
+        )
+
+
 def _check_tier_permission(user_ctx: UserContext, current_tier: str) -> None:
-    """Kiểm tra vai trò của người dùng có khớp với cấp đang chờ duyệt hay không."""
     expected_tier = ROLE_TO_TIER.get(user_ctx.role_code)
     if expected_tier != current_tier:
         raise BusinessError(
@@ -78,11 +107,40 @@ def _check_tier_permission(user_ctx: UserContext, current_tier: str) -> None:
 
 
 def _check_sod(proposer_user_id: uuid.UUID, actor_user_id: uuid.UUID) -> None:
-    """Kiểm tra nguyên tắc tách biệt nhiệm vụ (SoD) ở tầng ứng dụng."""
     if proposer_user_id == actor_user_id:
         raise BusinessError(
             code="SOD_VIOLATION",
             message="Người lập đề xuất không được phép tự phê duyệt/từ chối hồ sơ của chính mình.",
+            http_status=403,
+        )
+
+
+def _verify_reauth(
+    db: Session,
+    user_ctx: UserContext,
+    discrepancy_amount: Decimal,
+    reauth_min: Decimal,
+    reauth_method: str | None,
+    reauth_password: str | None,
+) -> None:
+    if discrepancy_amount < reauth_min:
+        return
+
+    if not reauth_method or not reauth_password:
+        raise BusinessError(
+            code="REAUTH_REQUIRED",
+            message=(
+                "Hồ sơ có giá trị vượt ngưỡng xác thực lại, bắt buộc cung cấp "
+                "reauth_method và reauth_password."
+            ),
+            http_status=403,
+        )
+
+    password_hash = repo.get_user_password_hash(db, user_ctx.user_id)
+    if not password_hash or not verify_password(reauth_password, password_hash):
+        raise BusinessError(
+            code="REAUTH_FAILED",
+            message="Mật khẩu xác thực lại không chính xác.",
             http_status=403,
         )
 
@@ -92,7 +150,6 @@ def _execute_post_approval(
     approval: ApprovalRequest,
     actor_user_id: uuid.UUID,
 ) -> None:
-    """D-05: Thực thi hậu kiểm sau khi hồ sơ được phê duyệt ở cấp cuối cùng."""
     if str(approval.object_type) in ("STOCK_ADJUSTMENT", "STOCK_SCRAP"):
         adj = repo.get_stock_adjustment_by_id(db, approval.object_id, for_update=True)
         if not adj:
@@ -124,7 +181,6 @@ def _execute_post_approval(
             adj.execution_status = _cast_enum("EXECUTED_INVENTORY", PG_EXEC_STATUS_TYPE)
             approval.execution_status = _cast_enum("EXECUTED_INVENTORY", PG_EXEC_STATUS_TYPE)
         else:
-            # Loại SCRAP: chờ Thủ kho xác nhận tiêu hủy vật lý tại TK-5.10
             adj.execution_status = _cast_enum("WAITING_SCRAP_EXECUTION", PG_EXEC_STATUS_TYPE)
             approval.execution_status = _cast_enum("WAITING_SCRAP_EXECUTION", PG_EXEC_STATUS_TYPE)
 
@@ -143,8 +199,6 @@ def _execute_post_approval(
             },
         )
     else:
-        # GRN_DISCREPANCY / CYCLE_COUNT_DIFF: trigger fn_approval_mirror_status đã cập nhật
-        # trạng thái chứng từ gốc sang APPROVED; module sở hữu sẽ hoàn tất bước ghi tồn.
         approval.execution_status = _cast_enum("WAITING_EXECUTION", PG_EXEC_STATUS_TYPE)
 
 
@@ -158,10 +212,6 @@ def create_approval_request(
     discrepancy_percent: Decimal = Decimal("0"),
     force_review: bool = False,
 ) -> ApprovalRequest | None:
-    """Hàm công khai (D-03) cho module khác gọi để phân luồng và tạo yêu cầu duyệt.
-
-    Trả về None nếu giá trị nằm trong dung sai Z (AUTO_TOLERANCE_Z).
-    """
     tier = repo.resolve_approval_tier_db(
         db=db,
         warehouse_id=warehouse_id,
@@ -220,11 +270,11 @@ def propose_stock_adjustment(
     user_ctx: UserContext,
     req: StockAdjustmentProposalCreate,
 ) -> ApprovalRequest:
-    """D-04: Thủ kho hoặc Quản lý đề xuất điều chỉnh tồn / hủy hàng (TK-4.3, TK-5.3)."""
-    if user_ctx.role_code not in ("thukho", "quanly"):
+    warehouse_id = _require_warehouse_id(user_ctx)
+    if user_ctx.role_code != "thukho":
         raise BusinessError(
             code="FORBIDDEN",
-            message="Chỉ Thủ kho hoặc Quản lý kho mới được đề xuất điều chỉnh tồn/hủy hàng.",
+            message="Chỉ Thủ kho mới có quyền đề xuất điều chỉnh tồn hoặc hủy hàng.",
             http_status=403,
         )
 
@@ -240,8 +290,8 @@ def propose_stock_adjustment(
     object_type = "STOCK_SCRAP" if req.adjustment_type == "SCRAP" else "STOCK_ADJUSTMENT"
 
     adj = StockAdjustment(
-        warehouse_id=user_ctx.warehouse_id,
-        adjustment_type=_cast_enum(req.adjustment_type, PG_ADJ_TYPE),
+        warehouse_id=warehouse_id,
+        adjustment_type=req.adjustment_type,
         location_id=req.location_id,
         sku_id=req.sku_id,
         lot_id=req.lot_id,
@@ -264,14 +314,14 @@ def propose_stock_adjustment(
 
     approval = create_approval_request(
         db=db,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         object_type=object_type,
         object_id=adj.adjustment_id,
         proposer_user_id=user_ctx.user_id,
         discrepancy_amount=total_value,
         force_review=True,
     )
-    assert approval is not None  # force_review=True luôn tạo phiếu duyệt
+    assert approval is not None
     return approval
 
 
@@ -285,7 +335,7 @@ def list_approvals_queue(
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[ApprovalRequest], int]:
-    """Lấy hàng chờ duyệt theo kho và bộ lọc."""
+    warehouse_id = _require_warehouse_id(user_ctx)
     if user_ctx.role_code not in ROLE_TO_TIER:
         raise BusinessError(
             code="FORBIDDEN",
@@ -299,7 +349,7 @@ def list_approvals_queue(
 
     return repo.list_approvals(
         db=db,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         status=status,
         tier=effective_tier,
         object_type=object_type,
@@ -315,7 +365,7 @@ def get_approval_detail(
     approval_id: uuid.UUID,
     acquire_lock: bool = True,
 ) -> tuple[ApprovalRequest, list[ApprovalHistory]]:
-    """Xem chi tiết hồ sơ, ghi nhận khóa xem chống mở trùng phiếu và trả lịch sử."""
+    warehouse_id = _require_warehouse_id(user_ctx)
     if user_ctx.role_code not in ROLE_TO_TIER:
         raise BusinessError(
             code="FORBIDDEN",
@@ -326,7 +376,7 @@ def get_approval_detail(
     approval = repo.get_approval_by_id(
         db=db,
         approval_id=approval_id,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         for_update=acquire_lock,
     )
     if not approval:
@@ -341,16 +391,11 @@ def get_approval_detail(
         "PENDING_D2",
         "PENDING_D3",
         "NEED_INFO",
+        "EXPIRED",
     ):
-        if (
-            approval.locked_by_viewer_id is not None
-            and approval.locked_by_viewer_id != user_ctx.user_id
-        ):
-            raise BusinessError(
-                code="APPROVAL_LOCKED_BY_OTHER",
-                message="Hồ sơ đang được cán bộ duyệt khác mở xử lý.",
-                http_status=409,
-            )
+        _check_tier_permission(user_ctx, str(approval.current_tier))
+        _ensure_not_locked_by_other(approval, user_ctx.user_id)
+
         approval.locked_by_viewer_id = user_ctx.user_id
         approval.locked_at = datetime.now(timezone.utc)
         db.flush()
@@ -359,17 +404,51 @@ def get_approval_detail(
     return approval, histories
 
 
+def unlock_approval(
+    db: Session,
+    user_ctx: UserContext,
+    approval_id: uuid.UUID,
+) -> ApprovalRequest:
+    warehouse_id = _require_warehouse_id(user_ctx)
+    approval = repo.get_approval_by_id(
+        db=db,
+        approval_id=approval_id,
+        warehouse_id=warehouse_id,
+        for_update=True,
+    )
+    if not approval:
+        raise BusinessError(
+            code="NOT_FOUND",
+            message="Không tìm thấy hồ sơ phê duyệt.",
+            http_status=404,
+        )
+
+    if approval.locked_by_viewer_id is not None:
+        now = datetime.now(timezone.utc)
+        if approval.locked_by_viewer_id != user_ctx.user_id and _is_lock_active(approval, now):
+            raise BusinessError(
+                code="APPROVAL_LOCKED_BY_OTHER",
+                message="Hồ sơ đang được cán bộ duyệt khác khóa xử lý.",
+                http_status=409,
+            )
+        approval.locked_by_viewer_id = None
+        approval.locked_at = None
+        db.flush()
+
+    return approval
+
+
 def approve_request(
     db: Session,
     user_ctx: UserContext,
     approval_id: uuid.UUID,
     req: ApproveDecisionRequest,
 ) -> ApprovalRequest:
-    """D-03/D-04/D-05: Phê duyệt hồ sơ hoặc chuyển tiếp lên cấp trên nếu vượt ngưỡng."""
+    warehouse_id = _require_warehouse_id(user_ctx)
     approval = repo.get_approval_by_id(
         db=db,
         approval_id=approval_id,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         for_update=True,
     )
     if not approval:
@@ -399,41 +478,22 @@ def approve_request(
 
     _check_sod(approval.proposer_user_id, user_ctx.user_id)
     _check_tier_permission(user_ctx, old_tier)
+    _ensure_not_locked_by_other(approval, user_ctx.user_id)
 
-    config = repo.get_warehouse_approval_config(db, user_ctx.warehouse_id)
+    config = repo.get_warehouse_approval_config(db, warehouse_id)
     reauth_min = Decimal(str((config or {}).get("reauth_min_amount", "10000000.00")))
-    if approval.discrepancy_value_amount >= reauth_min and not req.reauth_method:
-        raise BusinessError(
-            code="REAUTH_REQUIRED",
-            message="Hồ sơ có giá trị vượt ngưỡng xác thực lại, bắt buộc cung cấp reauth_method.",
-            http_status=403,
-        )
+    _verify_reauth(
+        db=db,
+        user_ctx=user_ctx,
+        discrepancy_amount=approval.discrepancy_value_amount,
+        reauth_min=reauth_min,
+        reauth_method=req.reauth_method,
+        reauth_password=req.reauth_password,
+    )
 
-    threshold_x = Decimal(str((config or {}).get("threshold_x_d1_amount", "5000000.00")))
-    threshold_y = Decimal(str((config or {}).get("threshold_y_d2_amount", "20000000.00")))
-
-    # Xác định có cần chuyển tiếp lên cấp cao hơn hay chốt APPROVED
-    next_tier: str | None = None
-    if old_tier == "D1_THUKHO" and approval.discrepancy_value_amount > threshold_x:
-        next_tier = "D2_QUANLY"
-    elif old_tier == "D2_QUANLY" and approval.discrepancy_value_amount > threshold_y:
-        next_tier = "D3_BGD"
-
-    if next_tier:
-        history_action = "ESCALATE_NEXT_TIER"
-        new_tier_str = next_tier
-        new_status_str = TIER_TO_PENDING_STATUS[next_tier]
-        approval.current_tier = _cast_enum(new_tier_str, PG_TIER_TYPE)
-        approval.status = _cast_enum(new_status_str, PG_STATUS_TYPE)
-        approval.sla_due_at = _compute_sla_due(config, next_tier)
-    else:
-        history_action = "APPROVE"
-        new_tier_str = old_tier
-        new_status_str = "APPROVED"
-        approval.status = _cast_enum("APPROVED", PG_STATUS_TYPE)
-        approval.final_decided_by = user_ctx.user_id
-        approval.final_decided_at = datetime.now(timezone.utc)
-
+    approval.status = _cast_enum("APPROVED", PG_STATUS_TYPE)
+    approval.final_decided_by = user_ctx.user_id
+    approval.final_decided_at = datetime.now(timezone.utc)
     approval.locked_by_viewer_id = None
     approval.locked_at = None
     approval.version_no += 1
@@ -442,33 +502,112 @@ def approve_request(
         approval_id=approval.approval_id,
         tier=_cast_enum(old_tier, PG_TIER_TYPE),
         actor_user_id=user_ctx.user_id,
-        action=history_action,
+        action="APPROVE",
         recommendation_or_reason=req.recommendation_or_reason,
         reauth_method=req.reauth_method,
     )
     try:
         db.add(history)
         db.flush()
-        if history_action == "APPROVE":
-            _execute_post_approval(db=db, approval=approval, actor_user_id=user_ctx.user_id)
-            db.flush()
+        _execute_post_approval(db=db, approval=approval, actor_user_id=user_ctx.user_id)
+        db.flush()
     except (IntegrityError, DBAPIError) as exc:
         raise translate_db_error(exc) from exc
 
     create_audit_log(
         db=db,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         actor_user_id=user_ctx.user_id,
         action_code="TK-3.2" if old_tier == "D1_THUKHO" else "QL-7.2",
         entity_name="approval_requests",
         entity_id=approval.approval_id,
         old_values={"status": old_status, "tier": old_tier},
         new_values={
-            "status": new_status_str,
-            "tier": new_tier_str,
-            "action": history_action,
+            "status": "APPROVED",
+            "tier": old_tier,
+            "action": "APPROVE",
         },
         reauth_verified=bool(req.reauth_method),
+    )
+    return approval
+
+
+def escalate_to_next_tier(
+    db: Session,
+    user_ctx: UserContext,
+    approval_id: uuid.UUID,
+    req: EscalateTierRequest,
+) -> ApprovalRequest:
+    warehouse_id = _require_warehouse_id(user_ctx)
+    approval = repo.get_approval_by_id(
+        db=db,
+        approval_id=approval_id,
+        warehouse_id=warehouse_id,
+        for_update=True,
+    )
+    if not approval:
+        raise BusinessError(
+            code="NOT_FOUND",
+            message="Không tìm thấy hồ sơ phê duyệt.",
+            http_status=404,
+        )
+
+    if approval.version_no != req.version_no:
+        raise BusinessError(
+            code="VERSION_CONFLICT",
+            message="Hồ sơ phê duyệt đã được người khác cập nhật.",
+            http_status=409,
+            details={"current_version_no": approval.version_no},
+        )
+
+    old_status = str(approval.status)
+    old_tier = str(approval.current_tier)
+
+    if old_tier != "D1_THUKHO" or old_status not in ("PENDING_D1", "EXPIRED"):
+        raise BusinessError(
+            code="INVALID_STATE",
+            message="Chỉ hồ sơ đang chờ ở cấp D1_THUKHO mới được chuyển tiếp lên D2_QUANLY.",
+            http_status=409,
+        )
+
+    _check_sod(approval.proposer_user_id, user_ctx.user_id)
+    _check_tier_permission(user_ctx, old_tier)
+    _ensure_not_locked_by_other(approval, user_ctx.user_id)
+
+    config = repo.get_warehouse_approval_config(db, warehouse_id)
+    approval.current_tier = _cast_enum("D2_QUANLY", PG_TIER_TYPE)
+    approval.status = _cast_enum("PENDING_D2", PG_STATUS_TYPE)
+    approval.sla_due_at = _compute_sla_due(config, "D2_QUANLY")
+    approval.locked_by_viewer_id = None
+    approval.locked_at = None
+    approval.version_no += 1
+
+    history = ApprovalHistory(
+        approval_id=approval.approval_id,
+        tier=_cast_enum(old_tier, PG_TIER_TYPE),
+        actor_user_id=user_ctx.user_id,
+        action="ESCALATE_NEXT_TIER",
+        recommendation_or_reason=req.recommendation_or_reason,
+    )
+    try:
+        db.add(history)
+        db.flush()
+    except (IntegrityError, DBAPIError) as exc:
+        raise translate_db_error(exc) from exc
+
+    create_audit_log(
+        db=db,
+        warehouse_id=warehouse_id,
+        actor_user_id=user_ctx.user_id,
+        action_code="TK-3.2",
+        entity_name="approval_requests",
+        entity_id=approval.approval_id,
+        old_values={"status": old_status, "tier": old_tier},
+        new_values={
+            "status": "PENDING_D2",
+            "tier": "D2_QUANLY",
+            "action": "ESCALATE_NEXT_TIER",
+        },
     )
     return approval
 
@@ -479,11 +618,11 @@ def reject_request(
     approval_id: uuid.UUID,
     req: RejectDecisionRequest,
 ) -> ApprovalRequest:
-    """Từ chối hồ sơ phê duyệt kèm lý do."""
+    warehouse_id = _require_warehouse_id(user_ctx)
     approval = repo.get_approval_by_id(
         db=db,
         approval_id=approval_id,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         for_update=True,
     )
     if not approval:
@@ -513,6 +652,7 @@ def reject_request(
 
     _check_sod(approval.proposer_user_id, user_ctx.user_id)
     _check_tier_permission(user_ctx, old_tier)
+    _ensure_not_locked_by_other(approval, user_ctx.user_id)
 
     approval.status = _cast_enum("REJECTED", PG_STATUS_TYPE)
     approval.execution_status = _cast_enum("NOT_APPLICABLE", PG_EXEC_STATUS_TYPE)
@@ -537,7 +677,7 @@ def reject_request(
 
     create_audit_log(
         db=db,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         actor_user_id=user_ctx.user_id,
         action_code="TK-3.3",
         entity_name="approval_requests",
@@ -554,11 +694,11 @@ def request_more_info(
     approval_id: uuid.UUID,
     req: RequestInfoDecisionRequest,
 ) -> ApprovalRequest:
-    """Trả hồ sơ về cho người lập bổ sung thông tin hoặc yêu cầu đếm lại."""
+    warehouse_id = _require_warehouse_id(user_ctx)
     approval = repo.get_approval_by_id(
         db=db,
         approval_id=approval_id,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         for_update=True,
     )
     if not approval:
@@ -587,6 +727,7 @@ def request_more_info(
         )
 
     _check_tier_permission(user_ctx, old_tier)
+    _ensure_not_locked_by_other(approval, user_ctx.user_id)
 
     approval.status = _cast_enum("NEED_INFO", PG_STATUS_TYPE)
     approval.locked_by_viewer_id = None
@@ -609,7 +750,7 @@ def request_more_info(
 
     create_audit_log(
         db=db,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         actor_user_id=user_ctx.user_id,
         action_code="TK-3.4",
         entity_name="approval_requests",
@@ -620,8 +761,144 @@ def request_more_info(
     return approval
 
 
+def resubmit_approval_info(
+    db: Session,
+    approval_id: uuid.UUID,
+    warehouse_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    note: str,
+    new_discrepancy_amount: Decimal | None = None,
+    new_discrepancy_percent: Decimal = Decimal("0"),
+) -> ApprovalRequest:
+    approval = repo.get_approval_by_id(
+        db=db,
+        approval_id=approval_id,
+        warehouse_id=warehouse_id,
+        for_update=True,
+    )
+    if not approval:
+        raise BusinessError(
+            code="NOT_FOUND",
+            message="Không tìm thấy hồ sơ phê duyệt cần bổ sung.",
+            http_status=404,
+        )
+
+    if str(approval.status) != "NEED_INFO":
+        raise BusinessError(
+            code="INVALID_STATE",
+            message=f"Hồ sơ đang ở trạng thái {approval.status}, không thể gửi bổ sung.",
+            http_status=409,
+        )
+
+    target_tier = str(approval.current_tier)
+    if new_discrepancy_amount is not None:
+        resolved_tier = repo.resolve_approval_tier_db(
+            db=db,
+            warehouse_id=warehouse_id,
+            object_type=str(approval.object_type),
+            amount=new_discrepancy_amount,
+            percent=new_discrepancy_percent,
+            proposer_id=approval.proposer_user_id,
+            force_review=True,
+        )
+        target_tier = resolved_tier
+        approval.discrepancy_value_amount = abs(new_discrepancy_amount)
+        approval.current_tier = _cast_enum(target_tier, PG_TIER_TYPE)
+
+    config = repo.get_warehouse_approval_config(db, warehouse_id)
+    new_status = TIER_TO_PENDING_STATUS[target_tier]
+    approval.status = _cast_enum(new_status, PG_STATUS_TYPE)
+    approval.sla_due_at = _compute_sla_due(config, target_tier)
+    approval.version_no += 1
+
+    history = ApprovalHistory(
+        approval_id=approval.approval_id,
+        tier=_cast_enum(target_tier, PG_TIER_TYPE),
+        actor_user_id=actor_user_id,
+        action="RESUBMIT_INFO",
+        recommendation_or_reason=note,
+    )
+    try:
+        db.add(history)
+        db.flush()
+    except (IntegrityError, DBAPIError) as exc:
+        raise translate_db_error(exc) from exc
+
+    create_audit_log(
+        db=db,
+        warehouse_id=warehouse_id,
+        actor_user_id=actor_user_id,
+        action_code="APPROVAL_RESUBMIT",
+        entity_name="approval_requests",
+        entity_id=approval.approval_id,
+        old_values={"status": "NEED_INFO"},
+        new_values={"status": new_status, "tier": target_tier, "note": note},
+    )
+    return approval
+
+
+def supersede_approval_for_recount(
+    db: Session,
+    approval_id: uuid.UUID,
+    warehouse_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    note: str = "Đóng hồ sơ cũ để đếm lại theo yêu cầu người duyệt",
+) -> ApprovalRequest:
+    approval = repo.get_approval_by_id(
+        db=db,
+        approval_id=approval_id,
+        warehouse_id=warehouse_id,
+        for_update=True,
+    )
+    if not approval:
+        raise BusinessError(
+            code="NOT_FOUND",
+            message="Không tìm thấy hồ sơ phê duyệt cần thay thế.",
+            http_status=404,
+        )
+
+    if str(approval.status) != "NEED_INFO":
+        raise BusinessError(
+            code="INVALID_STATE",
+            message=f"Hồ sơ đang ở trạng thái {approval.status}, không thể chuyển SUPERSEDED.",
+            http_status=409,
+        )
+
+    current_tier = str(approval.current_tier)
+    approval.status = _cast_enum("SUPERSEDED", PG_STATUS_TYPE)
+    approval.execution_status = _cast_enum("NOT_APPLICABLE", PG_EXEC_STATUS_TYPE)
+    approval.locked_by_viewer_id = None
+    approval.locked_at = None
+    approval.version_no += 1
+
+    history = ApprovalHistory(
+        approval_id=approval.approval_id,
+        tier=_cast_enum(current_tier, PG_TIER_TYPE),
+        actor_user_id=actor_user_id,
+        action="SUPERSEDED_BY_RECOUNT",
+        recommendation_or_reason=note,
+    )
+    try:
+        db.add(history)
+        db.flush()
+    except (IntegrityError, DBAPIError) as exc:
+        raise translate_db_error(exc) from exc
+
+    create_audit_log(
+        db=db,
+        warehouse_id=warehouse_id,
+        actor_user_id=actor_user_id,
+        action_code="APPROVAL_SUPERSEDED",
+        entity_name="approval_requests",
+        entity_id=approval.approval_id,
+        old_values={"status": "NEED_INFO"},
+        new_values={"status": "SUPERSEDED", "note": note},
+    )
+    return approval
+
+
 def escalate_expired_requests(db: Session, user_ctx: UserContext) -> int:
-    """Kích hoạt quét và tự động leo thang SLA hồ sơ quá hạn (gọi fn_escalate_expired_approvals)."""
+    warehouse_id = _require_warehouse_id(user_ctx)
     if user_ctx.role_code != "quanly":
         raise BusinessError(
             code="FORBIDDEN",
@@ -637,7 +914,7 @@ def escalate_expired_requests(db: Session, user_ctx: UserContext) -> int:
 
     create_audit_log(
         db=db,
-        warehouse_id=user_ctx.warehouse_id,
+        warehouse_id=warehouse_id,
         actor_user_id=user_ctx.user_id,
         action_code="QL-5.3",
         entity_name="approval_requests",

@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,7 +12,8 @@ class ApproveDecisionRequest(BaseModel):
     """Yêu cầu phê duyệt hồ sơ."""
 
     recommendation_or_reason: str | None = None
-    reauth_method: str | None = None  # BIOMETRIC | PASSWORD (bắt buộc nếu >= reauth_min_amount)
+    reauth_method: Literal["PASSWORD", "BIOMETRIC"] | None = None
+    reauth_password: str | None = None
     version_no: int = Field(ge=1)
 
 
@@ -30,10 +32,17 @@ class RequestInfoDecisionRequest(BaseModel):
     version_no: int = Field(ge=1)
 
 
+class EscalateTierRequest(BaseModel):
+    """Thủ kho (D1) chủ động chuyển hồ sơ lên cấp trên (D2)."""
+
+    recommendation_or_reason: str | None = None
+    version_no: int = Field(ge=1)
+
+
 class StockAdjustmentProposalCreate(BaseModel):
     """Đề xuất điều chỉnh tồn hoặc hủy hàng (TK-4.3, TK-5.3)."""
 
-    adjustment_type: str = Field(pattern="^(ADJUSTMENT|SCRAP)$")
+    adjustment_type: Literal["ADJUSTMENT", "SCRAP"]
     location_id: uuid.UUID
     sku_id: uuid.UUID
     lot_id: uuid.UUID | None = None

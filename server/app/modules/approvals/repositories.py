@@ -4,6 +4,7 @@ Chứa truy vấn SQLAlchemy và lời gọi trực tiếp các hàm DB (fn_reso
 fn_escalate_expired_approvals) theo Quy tắc 6 của đặc tả.
 """
 
+import json
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -90,6 +91,13 @@ def get_sku_unit_cost(db: Session, sku_id: uuid.UUID) -> Decimal | None:
     return Decimal(str(val)) if val is not None else None
 
 
+def get_user_password_hash(db: Session, user_id: uuid.UUID) -> str | None:
+    """Lấy password_hash của người dùng đang hoạt động để xác thực lại (reauth)."""
+    stmt = text("SELECT password_hash FROM users WHERE user_id = :user_id AND status = 'ACTIVE'")
+    val = db.execute(stmt, {"user_id": user_id}).scalar_one_or_none()
+    return str(val) if val else None
+
+
 def enqueue_erp_approval_sync(
     db: Session,
     warehouse_id: uuid.UUID,
@@ -98,8 +106,6 @@ def enqueue_erp_approval_sync(
     payload: dict[str, Any],
 ) -> None:
     """Ghi hàng đợi đồng bộ kết quả sau duyệt sang ERP mock."""
-    import json
-
     stmt = text(
         """
         INSERT INTO integration_sync_logs (
