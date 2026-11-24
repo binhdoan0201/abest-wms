@@ -243,7 +243,23 @@ class InventoryService:
         )
         return [_balance_to_schema(b) for b in balances]
 
+    @staticmethod
+    def has_stock(
+        db: Session,
+        warehouse_id: uuid.UUID | None = None,
+        location_id: uuid.UUID | None = None,
+        sku_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Cho module khác hỏi còn tồn (mọi trạng thái) theo kho, vị trí hoặc SKU hay không.
+
+        Dùng khi ngừng sử dụng danh mục (`master_data`): không cho ngừng kho, vị trí, SKU còn hàng.
+        """
+        return InventoryRepository.has_stock(
+            db=db, warehouse_id=warehouse_id, location_id=location_id, sku_id=sku_id
+        )
+
 
 # Export các hàm công khai theo đúng quy định
 apply_movement = InventoryService.apply_movement
 transfer_inventory = InventoryService.transfer_inventory
+has_stock = InventoryService.has_stock

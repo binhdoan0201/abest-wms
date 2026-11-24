@@ -199,3 +199,26 @@ class InventoryRepository:
         if warehouse_id:
             stmt = stmt.where(InventoryBalance.warehouse_id == warehouse_id)
         return list(db.execute(stmt).scalars().all())
+
+    @staticmethod
+    def has_stock(
+        db: Session,
+        warehouse_id: uuid.UUID | None = None,
+        location_id: uuid.UUID | None = None,
+        sku_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Kiểm tra còn dòng tồn khác 0 ở bất kỳ trạng thái nào theo kho, vị trí hoặc SKU."""
+        stmt = select(InventoryBalance.balance_id).where(
+            (InventoryBalance.qty_available != 0)
+            | (InventoryBalance.qty_allocated != 0)
+            | (InventoryBalance.qty_counting != 0)
+            | (InventoryBalance.qty_locked != 0)
+            | (InventoryBalance.qty_damaged != 0)
+        )
+        if warehouse_id is not None:
+            stmt = stmt.where(InventoryBalance.warehouse_id == warehouse_id)
+        if location_id is not None:
+            stmt = stmt.where(InventoryBalance.location_id == location_id)
+        if sku_id is not None:
+            stmt = stmt.where(InventoryBalance.sku_id == sku_id)
+        return db.execute(stmt.limit(1)).first() is not None
