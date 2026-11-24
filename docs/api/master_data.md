@@ -57,7 +57,7 @@ Ký hiệu: **bắt buộc khi tạo**, *(tạo)* chỉ đặt lúc tạo, còn 
 | `zones` | **`zone_code`** *(tạo)*, **`zone_name`**, **`zone_type`** |
 | `locations` | **`zone_id`**, **`location_code`** *(tạo)*, **`barcode`**, `aisle`, `rack`, `shelf_level`, `bin`, `max_weight_kg`, `max_volume_m3`, `max_pallets` |
 | `item-categories` | **`category_code`** *(tạo)*, **`category_name`**, `min_receiving_shelf_life_days` (≥ 0, mặc định 0), `shelf_life_violation_action` (mặc định `WARN`) |
-| `skus` | **`sku_code`** *(tạo)*, **`sku_name`**, `category_id`, **`base_uom`**, `unit_cost` (≥ 0), `min_stock_level` (≥ 0), `is_lot_tracked` (mặc định `true`), `is_expiry_tracked` (mặc định `true`), `is_serial_tracked` (mặc định `false`), `storage_requirement` (mặc định `NORMAL`) |
+| `skus` | **`sku_code`** *(tạo)*, **`sku_name`**, `category_id`, **`base_uom`**, `unit_cost` (≥ 0), `min_stock_level` (≥ 0), `is_lot_tracked` (mặc định `true`), `is_expiry_tracked` (mặc định `true`), `is_serial_tracked` (mặc định `false`), `storage_requirement` (mặc định `NORMAL`), `unit_weight_kg` (kg, ≥ 0), `unit_volume_m3` (m³, ≥ 0) |
 | `sku-barcodes` | **`sku_id`** *(tạo)*, **`barcode`** *(tạo)*, **`uom_code`**, `conversion_factor` (> 0, mặc định 1) |
 | `suppliers` | **`erp_supplier_code`** *(tạo)*, **`supplier_name`**, `contact_person`, `phone`, `email` |
 | `customers` | **`erp_customer_code`** *(tạo)*, **`customer_name`**, `shipping_address`, `phone` |
@@ -160,6 +160,7 @@ POST /api/v1/skus
 | `MASTER_DATA_IN_USE` | 409 | Ngừng sử dụng bản ghi còn được dùng (xem endpoint 5) |
 | `MASTER_DATA_NOT_DEACTIVATABLE` | 409 | Danh mục không có cột `is_active` |
 | `MASTER_DATA_INVALID_THRESHOLD` | 422 | Ngưỡng D1 lớn hơn ngưỡng D2 |
+| `MASTER_DATA_UOM_NOT_CONVERTIBLE` | 422 | `convert_to_base_uom`: đơn vị chưa có mã vạch quy đổi hoặc có nhiều hệ số khác nhau |
 
 ## Hàm công khai cho module khác
 
@@ -170,3 +171,8 @@ Module khác đọc danh mục qua các hàm export trong `server.app.modules.ma
 | `get_warehouse_config(db, warehouse_id)` | `dict` toàn bộ cấu hình kho (NUMERIC là `Decimal`), ném `NOT_FOUND` nếu không có |
 | `get_sku(db, sku_id)` | `dict` thông tin SKU (gồm `unit_cost`, cờ theo dõi lô/hạn/serial), ném `NOT_FOUND` nếu không có |
 | `get_location(db, location_id, warehouse_id)` | `dict` thông tin vị trí trong kho, ném `NOT_FOUND` nếu không có hoặc khác kho |
+| `convert_to_base_uom(db, sku_id, uom_code, qty)` | `Decimal` số lượng theo `skus.base_uom`. Hệ số lấy từ `sku_barcodes.conversion_factor` (1 `uom_code` = hệ số × `base_uom`); `uom_code` trùng `base_uom` thì trả nguyên `qty`. Ném `NOT_FOUND` hoặc `MASTER_DATA_UOM_NOT_CONVERTIBLE` |
+
+Quy tắc đơn vị tính (chuẩn API mục 2.3): tồn kho, sổ cái, cấp phát và so lệch luôn tính theo `base_uom`. `inbound` quy đổi số lượng dòng PO, dòng GRN; `outbound` quy đổi dòng đơn (nếu có đơn vị khác) trước khi gọi `inventory`.
+
+`unit_weight_kg`, `unit_volume_m3` tính cho 1 đơn vị `base_uom`, có thể `null` khi ERP chưa có dữ liệu; gợi ý cất hàng và đóng gói bỏ qua kiểm tra tải khi giá trị là `null`.

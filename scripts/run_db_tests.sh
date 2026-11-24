@@ -59,14 +59,20 @@ EOF
 echo "2. Nạp schema.sql và patch_v4_2_1.sql vào $DB_TEMP_NAME"
 exec_sql_file "$DB_TEMP_NAME" "database/schema.sql"
 exec_sql_file "$DB_TEMP_NAME" "database/patch_v4_2_1.sql"
+for migration_file in $(ls database/migrations/*.sql 2>/dev/null | sort); do
+  exec_sql_file "$DB_TEMP_NAME" "$migration_file"
+done
 
 # 3. Chạy smoke_test.sql trên CSDL tạm
 echo "3. Chạy wms_smoke_test_v4_2_1.sql"
 exec_sql_file "$DB_TEMP_NAME" "database/tests/smoke_test.sql"
 
 # 4. Chạy patch_v4_2_1.sql lần 2 trên CSDL tạm để chứng minh tính idempotent
-echo "4. Chạy patch_v4_2_1.sql lần 2 để kiểm tra idempotent"
+echo "4. Chạy patch_v4_2_1.sql và các migration lần 2 để kiểm tra idempotent"
 exec_sql_file "$DB_TEMP_NAME" "database/patch_v4_2_1.sql"
+for migration_file in $(ls database/migrations/*.sql 2>/dev/null | sort); do
+  exec_sql_file "$DB_TEMP_NAME" "$migration_file"
+done
 
 # 5. Chạy test_seed.sql trên CSDL chính đã seed
 echo "5. Chạy test_seed.sql trên CSDL chính ($DB_NAME)"

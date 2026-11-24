@@ -27,6 +27,7 @@ Tài liệu này chốt công nghệ và quy ước API để 4 người cùng c
 1. Tiền tố `/api/v1`. Tên đường dẫn `kebab-case`, danh từ số nhiều; hành động ngoài CRUD là `POST /{id}/<động-từ>`.
 2. JSON dùng `snake_case`. Mã định danh là UUID dạng chuỗi.
 3. **Số lượng và tiền (NUMERIC) trả và nhận dạng chuỗi**, ví dụ `"6.000"`, để không mất chính xác. Thời gian theo ISO 8601 UTC, ví dụ `"2026-11-13T08:30:00Z"`.
+   - **Đơn vị tính**: tồn kho, sổ cái, cấp phát và so lệch luôn tính theo đơn vị cơ sở `skus.base_uom`. Chứng từ có `uom_code` khác (dòng PO, dòng GRN) phải quy đổi bằng `master_data.convert_to_base_uom` trước khi gọi `apply_movement` hoặc so với số dự kiến; đơn vị chưa có hệ số quy đổi trả 422 `MASTER_DATA_UOM_NOT_CONVERTIBLE`.
 4. Xác thực bằng header `Authorization: Bearer <token>`. Token chứa `sub` (user\_id), `role_code`, `warehouse_id`. **Client không gửi `warehouse_id`**: server lấy từ token và lọc mọi truy vấn theo kho.
 5. Phản hồi thành công: `{"data": ..., "meta": {"request_id": "..."}}`. Danh sách thêm `meta.page`, `meta.page_size`, `meta.total`.
 6. Phản hồi lỗi: `{"error": {"code": "MÃ_LỖI", "message": "tiếng Việt", "details": {}}}`.
