@@ -1,6 +1,15 @@
-"""ABEST WMS - Module Phê duyệt (Approvals)."""
+"""ABEST WMS - Phân hệ Phê duyệt & Điều chỉnh tồn (Approvals)."""
 
 from server.app.modules.approvals.routers import router
-from server.app.modules.approvals.services import ApprovalsService
+from server.app.modules.approvals.services import (
+    create_approval_request,
+    resubmit_approval_info,
+    supersede_approval_for_recount,
+)
 
-__all__ = ["ApprovalsService", "router"]
+__all__ = [
+    "router",
+    "create_approval_request",
+    "resubmit_approval_info",
+    "supersede_approval_for_recount",
+]
