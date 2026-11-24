@@ -1,11 +1,13 @@
 """ABEST WMS - Module Quản lý Tồn kho (Inventory).
 
-Chỉ export apply_movement và transfer_inventory theo đúng yêu cầu đặc tả AG5.
+Export apply_movement, transfer_inventory (đặc tả AG5) và has_stock
+(kiểm tra còn tồn khi master_data ngừng sử dụng kho, vị trí, SKU).
 """
 
-from server.app.modules.inventory.services import apply_movement, transfer_inventory
+from server.app.modules.inventory.services import apply_movement, has_stock, transfer_inventory
 
 __all__ = [
     "apply_movement",
+    "has_stock",
     "transfer_inventory",
 ]

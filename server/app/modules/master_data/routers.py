@@ -1,146 +1,188 @@
 """ABEST WMS - Routers cho Phân hệ Dữ liệu nguồn (Master Data).
 
-Khai báo toàn bộ endpoint theo Mục 4.2 Chuẩn API:
-Mẫu chung cho 12 tài nguyên:
-GET /{res}, GET /{res}/{id}, POST /{res}, PATCH /{res}/{id}, POST /{res}/{id}/deactivate.
-Mọi endpoint trả về HTTP 501 Not Implemented kèm kiểm tra quyền RBAC.
+Khai báo endpoint theo Mục 4.2 Chuẩn API và hợp đồng `docs/api/master_data.md`:
+- 10 danh mục, mỗi danh mục 5 endpoint: GET /{res}, GET /{res}/{id}, POST /{res},
+  PATCH /{res}/{id}, POST /{res}/{id}/deactivate. Đọc: mọi vai trò đã đăng nhập; ghi: `AD-1`.
+- Cấu hình kho: GET, PATCH /warehouses/{id}/config.
+- `users`, `roles`: làm ở giai đoạn sau cùng màn hình Admin (A-11), hiện trả 501.
 """
 
-import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, status
+from pydantic import BaseModel
 
 from server.app.core.database import DbSession, get_db
 from server.app.core.exceptions import BusinessError
 from server.app.core.rbac import UserContext, get_current_user, require_permission
+from server.app.core.responses import success_response
 from server.app.modules.master_data.schemas import (
-    CreateResourceRequest,
-    UpdateResourceRequest,
+    BoxTypeCreate,
+    BoxTypeUpdate,
+    CustomerCreate,
+    CustomerUpdate,
+    ItemCategoryCreate,
+    ItemCategoryUpdate,
+    LocationCreate,
+    LocationUpdate,
+    ReasonCodeCreate,
+    ReasonCodeUpdate,
+    SkuBarcodeCreate,
+    SkuBarcodeUpdate,
+    SkuCreate,
+    SkuUpdate,
+    SupplierCreate,
+    SupplierUpdate,
+    WarehouseConfigUpdate,
+    WarehouseCreate,
+    WarehouseUpdate,
+    ZoneCreate,
+    ZoneUpdate,
 )
+from server.app.modules.master_data.services import MasterDataService
 
 router = APIRouter(tags=["Master Data"])
 
-# Danh sách 10 tài nguyên danh mục dùng chung
-MASTER_DATA_RESOURCES = [
-    "warehouses",
-    "zones",
-    "locations",
-    "item-categories",
-    "skus",
-    "sku-barcodes",
-    "suppliers",
-    "customers",
-    "reason-codes",
-    "box-types",
-]
+WRITE_PERMISSION = "AD-1"
+
+# Tài nguyên -> (schema tạo, schema sửa)
+MASTER_DATA_RESOURCES: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
+    "warehouses": (WarehouseCreate, WarehouseUpdate),
+    "zones": (ZoneCreate, ZoneUpdate),
+    "locations": (LocationCreate, LocationUpdate),
+    "item-categories": (ItemCategoryCreate, ItemCategoryUpdate),
+    "skus": (SkuCreate, SkuUpdate),
+    "sku-barcodes": (SkuBarcodeCreate, SkuBarcodeUpdate),
+    "suppliers": (SupplierCreate, SupplierUpdate),
+    "customers": (CustomerCreate, CustomerUpdate),
+    "reason-codes": (ReasonCodeCreate, ReasonCodeUpdate),
+    "box-types": (BoxTypeCreate, BoxTypeUpdate),
+}
 
 
-def _register_crud_routes(res_name: str, read_perm: str | None = None) -> None:
-    """Tạo bộ 5 endpoint chuẩn REST cho từng tài nguyên danh mục."""
+# Cấu hình kho khai báo trước để không bị nhầm với /warehouses/{item_id}
+@router.get(
+    "/warehouses/{warehouse_id}/config",
+    summary="Đọc cấu hình vận hành của kho",
+    operation_id="get_warehouse_config",
+)
+def get_warehouse_config_endpoint(
+    warehouse_id: str,
+    user_ctx: UserContext = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Đọc cấu hình kho (vai trò thường chỉ kho của mình, admin mọi kho)."""
+    return success_response(data=MasterDataService.get_config(db, user_ctx, warehouse_id))
 
-    @router.get(
-        f"/{res_name}",
-        summary=f"Danh sách {res_name}",
-        operation_id=f"list_{res_name.replace('-', '_')}",
-    )
+
+@router.patch(
+    "/warehouses/{warehouse_id}/config",
+    summary="Sửa cấu hình vận hành của kho",
+    operation_id="update_warehouse_config",
+)
+def update_warehouse_config_endpoint(
+    warehouse_id: str,
+    req: WarehouseConfigUpdate,
+    _perm: str = Depends(require_permission(WRITE_PERMISSION)),
+    user_ctx: UserContext = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Sửa tham số vận hành kho (admin)."""
+    return success_response(data=MasterDataService.update_config(db, user_ctx, warehouse_id, req))
+
+
+def _register_crud_routes(
+    res_name: str, create_schema: type[BaseModel], update_schema: type[BaseModel]
+) -> None:
+    """Tạo bộ 5 endpoint chuẩn cho một danh mục."""
+    op = res_name.replace("-", "_")
+
+    @router.get(f"/{res_name}", summary=f"Danh sách {res_name}", operation_id=f"list_{op}")
     def list_items(
+        request: Request,
         user_ctx: UserContext = Depends(get_current_user),
         db: DbSession = Depends(get_db),
     ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint GET /{res_name} đang phát triển (TODO: Chủ module B)",
-            http_status=501,
-        )
+        params = dict(request.query_params)
+        items, total, page, page_size = MasterDataService.list_items(db, user_ctx, res_name, params)
+        return success_response(data=items, page=page, page_size=page_size, total=total)
 
     @router.get(
         f"/{res_name}/{{item_id}}",
         summary=f"Chi tiết {res_name}",
-        operation_id=f"get_{res_name.replace('-', '_')}_by_id",
+        operation_id=f"get_{op}_by_id",
     )
     def get_item(
-        item_id: uuid.UUID,
+        item_id: str,
         user_ctx: UserContext = Depends(get_current_user),
         db: DbSession = Depends(get_db),
     ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint GET /{res_name}/{{id}} đang phát triển (TODO: Chủ module B)",
-            http_status=501,
-        )
+        return success_response(data=MasterDataService.get_item(db, user_ctx, res_name, item_id))
 
     @router.post(
         f"/{res_name}",
         summary=f"Tạo mới {res_name}",
-        operation_id=f"create_{res_name.replace('-', '_')}",
+        operation_id=f"create_{op}",
+        status_code=status.HTTP_201_CREATED,
     )
     def create_item(
-        req: CreateResourceRequest,
-        _perm: str = Depends(require_permission("AD-1")),
+        req: create_schema,  # type: ignore[valid-type]
+        _perm: str = Depends(require_permission(WRITE_PERMISSION)),
+        user_ctx: UserContext = Depends(get_current_user),
         db: DbSession = Depends(get_db),
     ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint POST /{res_name} đang phát triển (TODO: Chủ module B)",
-            http_status=501,
-        )
+        return success_response(data=MasterDataService.create_item(db, user_ctx, res_name, req))
 
     @router.patch(
         f"/{res_name}/{{item_id}}",
         summary=f"Cập nhật {res_name}",
-        operation_id=f"update_{res_name.replace('-', '_')}",
+        operation_id=f"update_{op}",
     )
     def update_item(
-        item_id: uuid.UUID,
-        req: UpdateResourceRequest,
-        _perm: str = Depends(require_permission("AD-1")),
+        item_id: str,
+        req: update_schema,  # type: ignore[valid-type]
+        _perm: str = Depends(require_permission(WRITE_PERMISSION)),
+        user_ctx: UserContext = Depends(get_current_user),
         db: DbSession = Depends(get_db),
     ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint PATCH /{res_name}/{{id}} đang phát triển (TODO: Chủ module B)",
-            http_status=501,
+        return success_response(
+            data=MasterDataService.update_item(db, user_ctx, res_name, item_id, req)
         )
 
     @router.post(
         f"/{res_name}/{{item_id}}/deactivate",
-        summary=f"Ngừng kích hoạt {res_name}",
-        operation_id=f"deactivate_{res_name.replace('-', '_')}",
+        summary=f"Ngừng sử dụng {res_name}",
+        operation_id=f"deactivate_{op}",
     )
     def deactivate_item(
-        item_id: uuid.UUID,
-        _perm: str = Depends(require_permission("AD-1")),
+        item_id: str,
+        _perm: str = Depends(require_permission(WRITE_PERMISSION)),
+        user_ctx: UserContext = Depends(get_current_user),
         db: DbSession = Depends(get_db),
     ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint POST /{res_name}/{{id}}/deactivate đang phát triển",
-            http_status=501,
+        return success_response(
+            data=MasterDataService.deactivate_item(db, user_ctx, res_name, item_id)
         )
 
 
-# 1. Đăng ký cho 10 tài nguyên danh mục chung
-for resource in MASTER_DATA_RESOURCES:
-    _register_crud_routes(resource)
+for _res_name, (_create_schema, _update_schema) in MASTER_DATA_RESOURCES.items():
+    _register_crud_routes(_res_name, _create_schema, _update_schema)
 
 
-# 2. Đăng ký cho users và roles (yêu cầu quyền AD-1 cho cả đọc và ghi)
-def _register_admin_routes(admin_res: str) -> None:
-    @router.get(
-        f"/{admin_res}",
-        summary=f"Danh sách {admin_res}",
-        operation_id=f"list_{admin_res}",
+def _not_implemented(path: str) -> BusinessError:
+    return BusinessError(
+        code="NOT_IMPLEMENTED",
+        message=f"Endpoint {path} làm ở giai đoạn sau cùng màn hình Admin (A-11)",
+        http_status=501,
     )
-    def list_admin_items(
-        _perm: str = Depends(require_permission("AD-1")),
-        db: DbSession = Depends(get_db),
-    ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint GET /{admin_res} đang phát triển",
-            http_status=501,
-        )
+
+
+def _register_admin_routes(admin_res: str) -> None:
+    """`users`, `roles`: giữ chỗ endpoint (yêu cầu AD-1), trả 501 đến khi làm A-11."""
+
+    @router.get(f"/{admin_res}", summary=f"Danh sách {admin_res}", operation_id=f"list_{admin_res}")
+    def list_admin_items(_perm: str = Depends(require_permission(WRITE_PERMISSION))) -> None:
+        raise _not_implemented(f"GET /{admin_res}")
 
     @router.get(
         f"/{admin_res}/{{item_id}}",
@@ -148,31 +190,15 @@ def _register_admin_routes(admin_res: str) -> None:
         operation_id=f"get_{admin_res}_by_id",
     )
     def get_admin_item(
-        item_id: uuid.UUID,
-        _perm: str = Depends(require_permission("AD-1")),
-        db: DbSession = Depends(get_db),
-    ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint GET /{admin_res}/{{id}} đang phát triển",
-            http_status=501,
-        )
+        item_id: str, _perm: str = Depends(require_permission(WRITE_PERMISSION))
+    ) -> None:
+        raise _not_implemented(f"GET /{admin_res}/{{id}}")
 
     @router.post(
-        f"/{admin_res}",
-        summary=f"Tạo mới {admin_res}",
-        operation_id=f"create_{admin_res}",
+        f"/{admin_res}", summary=f"Tạo mới {admin_res}", operation_id=f"create_{admin_res}"
     )
-    def create_admin_item(
-        req: CreateResourceRequest,
-        _perm: str = Depends(require_permission("AD-1")),
-        db: DbSession = Depends(get_db),
-    ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint POST /{admin_res} đang phát triển",
-            http_status=501,
-        )
+    def create_admin_item(_perm: str = Depends(require_permission(WRITE_PERMISSION))) -> None:
+        raise _not_implemented(f"POST /{admin_res}")
 
     @router.patch(
         f"/{admin_res}/{{item_id}}",
@@ -180,33 +206,20 @@ def _register_admin_routes(admin_res: str) -> None:
         operation_id=f"update_{admin_res}",
     )
     def update_admin_item(
-        item_id: uuid.UUID,
-        req: UpdateResourceRequest,
-        _perm: str = Depends(require_permission("AD-1")),
-        db: DbSession = Depends(get_db),
-    ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint PATCH /{admin_res}/{{id}} đang phát triển",
-            http_status=501,
-        )
+        item_id: str, _perm: str = Depends(require_permission(WRITE_PERMISSION))
+    ) -> None:
+        raise _not_implemented(f"PATCH /{admin_res}/{{id}}")
 
     @router.post(
         f"/{admin_res}/{{item_id}}/deactivate",
-        summary=f"Ngừng kích hoạt {admin_res}",
+        summary=f"Ngừng sử dụng {admin_res}",
         operation_id=f"deactivate_{admin_res}",
     )
     def deactivate_admin_item(
-        item_id: uuid.UUID,
-        _perm: str = Depends(require_permission("AD-1")),
-        db: DbSession = Depends(get_db),
-    ) -> dict[str, Any]:
-        raise BusinessError(
-            code="NOT_IMPLEMENTED",
-            message=f"Endpoint POST /{admin_res}/{{id}}/deactivate đang phát triển",
-            http_status=501,
-        )
+        item_id: str, _perm: str = Depends(require_permission(WRITE_PERMISSION))
+    ) -> None:
+        raise _not_implemented(f"POST /{admin_res}/{{id}}/deactivate")
 
 
-for admin_res in ["users", "roles"]:
-    _register_admin_routes(admin_res)
+for _admin_res in ("users", "roles"):
+    _register_admin_routes(_admin_res)
