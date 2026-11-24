@@ -27,6 +27,7 @@ Tài liệu này chốt công nghệ và quy ước API để 4 người cùng c
 1. Tiền tố `/api/v1`. Tên đường dẫn `kebab-case`, danh từ số nhiều; hành động ngoài CRUD là `POST /{id}/<động-từ>`.
 2. JSON dùng `snake_case`. Mã định danh là UUID dạng chuỗi.
 3. **Số lượng và tiền (NUMERIC) trả và nhận dạng chuỗi**, ví dụ `"6.000"`, để không mất chính xác. Thời gian theo ISO 8601 UTC, ví dụ `"2026-11-13T08:30:00Z"`.
+   - **Đơn vị tính**: tồn kho, sổ cái, cấp phát và so lệch luôn tính theo đơn vị cơ sở `skus.base_uom`. Chứng từ có `uom_code` khác (dòng PO, dòng GRN) phải quy đổi bằng `master_data.convert_to_base_uom` trước khi gọi `apply_movement` hoặc so với số dự kiến; đơn vị chưa có hệ số quy đổi trả 422 `MASTER_DATA_UOM_NOT_CONVERTIBLE`.
 4. Xác thực bằng header `Authorization: Bearer <token>`. Token chứa `sub` (user\_id), `role_code`, `warehouse_id`. **Client không gửi `warehouse_id`**: server lấy từ token và lọc mọi truy vấn theo kho.
 5. Phản hồi thành công: `{"data": ..., "meta": {"request_id": "..."}}`. Danh sách thêm `meta.page`, `meta.page_size`, `meta.total`.
 6. Phản hồi lỗi: `{"error": {"code": "MÃ_LỖI", "message": "tiếng Việt", "details": {}}}`.
@@ -69,7 +70,7 @@ Cột «Vai trò» dùng `role_code`; «mọi vai trò» là mọi người dùn
 | GET | `/auth/me` | Thông tin người dùng và danh sách quyền | mọi vai trò |
 | POST | `/auth/change-password` | Đổi mật khẩu (bắt buộc lần đầu) | mọi vai trò |
 
-### 4.2 `master_data` (B)
+### 4.2 `master_data` (A)
 
 Mẫu chung cho mỗi tài nguyên: `GET /{tài-nguyên}`, `GET /{tài-nguyên}/{id}`, `POST /{tài-nguyên}`, `PATCH /{tài-nguyên}/{id}`, `POST /{tài-nguyên}/{id}/deactivate`.
 
@@ -159,7 +160,7 @@ Yêu cầu duyệt chênh lệch (`GRN_DISCREPANCY`, `CYCLE_COUNT_DIFF`) đượ
 | POST | `/approvals/{id}/request-info` | Trả về người lập xin thêm thông tin hoặc đếm lại | đúng cấp của yêu cầu |
 | POST | `/approvals/escalate-expired` | Chạy leo thang SLA toàn hệ thống (gọi `fn_escalate_expired_approvals`) | `quanly` |
 
-### 4.9 `cycle_count` (D)
+### 4.9 `cycle_count` (B)
 
 | Method | Đường dẫn | Mục đích | Vai trò |
 | --- | --- | --- | --- |
@@ -169,7 +170,7 @@ Yêu cầu duyệt chênh lệch (`GRN_DISCREPANCY`, `CYCLE_COUNT_DIFF`) đượ
 | POST | `/cycle-counts/{id}/lines/{line_id}/recount` | Đếm lại, phải là người khác lần trước | `nv-kiemke` |
 | POST | `/cycle-counts/{id}/close` | Đóng phiếu | `thukho` |
 
-### 4.10 `dashboard` (D, chỉ đọc)
+### 4.10 `dashboard` (A, chỉ đọc)
 
 | Method | Đường dẫn | Mục đích | Vai trò |
 | --- | --- | --- | --- |
@@ -232,7 +233,7 @@ Ví dụ request và phản hồi:
 | --- | --- | --- | --- |
 | Cả nhóm đọc và chốt mục 1 (công nghệ) | Cả nhóm, A ghi ADR | Ngày 1 | Có `docs/adr/0001-cong-nghe.md`, không còn ý kiến mở |
 | Dựng khung chung: envelope, dịch lỗi, `require_permission`, `api_client` | A | Ngày 1 đến 2 | Một endpoint mẫu `GET /auth/me` chạy đủ envelope và mã lỗi |
-| Viết `docs/api/<module>.md` theo mẫu mục 5 cho module của mình | B (master\_data, inbound), C (outbound), D (tasks, approvals, cycle\_count, dashboard), A (auth, inventory, integrations) | Ngày 2 đến 3 | Mọi endpoint của mục 4 có đủ body, phản hồi, mã lỗi; module gọi đến đã ghi «ok» trong PR |
+| Viết `docs/api/<module>.md` theo mẫu mục 5 cho module của mình | A (auth, master\_data, inventory, integrations, dashboard), B (inbound, cycle\_count), C (outbound), D (tasks, approvals) | Ngày 2 đến 3 | Mọi endpoint của mục 4 có đủ body, phản hồi, mã lỗi; module gọi đến đã ghi «ok» trong PR |
 | Sinh OpenAPI từ FastAPI rồi đối chiếu với `docs/api/` | A | Ngày 3 | Không còn endpoint nào khác nhau giữa code và tài liệu |
 
 ## 7. Phân tầng xử lý và MVC
