@@ -14,7 +14,7 @@ Tiền tố: `/api/v1`. Response theo chuẩn `docs/spec/chuan-api-cong-nghe.md`
 ## 1. Luồng tổng quan
 
 ```
-ERP mock -> PO, ASN (A gọi receive_purchase_order / receive_asn)
+ERP mock -> integrations (A-07) -> bộ xử lý PO, ASN do inbound đăng ký
 nv-nhan: POST /grns -> POST /grns/{id}/lines (lặp) -> POST /grns/{id}/submit
     submit: lệch bằng 0 và không có điều kiện buộc duyệt -> APPROVED ngay
             còn lại -> approvals tính tầng (D1/D2/D3) -> PENDING_Dx, pallet QUARANTINE_HOLD
@@ -36,13 +36,13 @@ nv-nhan chỉ thấy và thao tác phiếu do chính mình nhận (`403 FORBIDDE
 
 | Phương thức và đường dẫn | Mục đích | Quyền |
 |---|---|---|
-| `GET /purchase-orders` | Danh sách PO; lọc `status`, `supplier_id`; sắp xếp `created_at`, `expected_date`, `erp_po_number` | QL-2.1 |
-| `GET /purchase-orders/{po_id}` | Chi tiết kèm dòng (số lượng ẩn với nv-nhan) | QL-2.1 |
-| `GET /asns` | Danh sách ASN; lọc `status`, `po_id` | QL-2.3 |
+| `GET /purchase-orders` | Danh sách PO; lọc `status`, `supplier_id`; sắp xếp `created_at`, `expected_date`, `erp_po_number` | NH-1 |
+| `GET /purchase-orders/{po_id}` | Chi tiết kèm dòng (số lượng ẩn với nv-nhan) | NH-1 |
+| `GET /asns` | Danh sách ASN; lọc `status`, `po_id` | NH-1 |
 
-> **Mã quyền.** `NH-2` và `NH-5` cấp giống `NH-1` (nv-nhan X, thukho V, quanly V); `QL-2.3` cấp giống `QL-2.1` (thukho V, quanly V); cất hàng dùng `CAT-1`. Các mã này được thêm vào seed ở PR #28.
+> **Mã quyền.** Ba endpoint đọc PO và ASN dùng `NH-1` (nv-nhan X, thukho V, quanly V) để nhân viên nhận hàng mở được PO, đúng chuẩn API 4.5; số lượng vẫn ẩn với nv-nhan. `NH-2` và `NH-5` cấp giống `NH-1`; cất hàng dùng `CAT-1`. Các mã này được thêm vào seed ở PR #28. Vì `NH-1` chỉ cấp mức V cho thukho và quanly, các endpoint ghi (`POST /grns`, `/lines`, `/submit`, `/recount`, `/complete`) bắt buộc kiểm mức `X`.
 
-PO và ASN **không có endpoint tạo**: ERP mock đẩy sang, router tích hợp của A gọi hai hàm công khai `inbound.receive_purchase_order(db, warehouse_id, data, actor_id)` và `inbound.receive_asn(...)`.
+PO và ASN **không có endpoint tạo**: ERP mock đẩy sang `integrations` (A-07). Inbound tự đăng ký hai bộ xử lý bằng `register_erp_handler("PO", handler)` và `register_erp_handler("ASN", handler)` (import từ `server.app.modules.integrations`). Chữ ký `handler(db, normalized: dict, actor_id: UUID) -> UUID`; `warehouse_id` và các ID đã đổi từ mã nằm trong `normalized` (các trường xem `docs/api/integrations.md`). Hai hàm `receive_purchase_order` và `receive_asn` giữ lại làm bộ xử lý, đổi sang chữ ký trên. Lỗi nghiệp vụ cứ `raise BusinessError`: integrations ghi `FAILED_BUSINESS` và trả mã lỗi cho ERP.
 
 ### 1. GET /api/v1/purchase-orders
 ### 2. GET /api/v1/purchase-orders/{po_id}
@@ -56,10 +56,10 @@ ASN do chuyển kho (cột `source_outbound_order_id`, patch v4.2.1) cũng đọ
 
 | Phương thức và đường dẫn | Mục đích | Quyền |
 |---|---|---|
-| `POST /grns` | Mở phiếu từ PO hoặc ASN (201) | NH-1 |
+| `POST /grns` | Mở phiếu từ PO hoặc ASN (201) | NH-1 (mức X) |
 | `GET /grns` | Danh sách; lọc `status`, `po_id`; nv-nhan chỉ thấy phiếu của mình | NH-1 |
 | `GET /grns/{grn_id}` | Chi tiết kèm dòng | NH-1 |
-| `POST /grns/{grn_id}/lines` | Thêm một dòng đếm (201) | NH-2 |
+| `POST /grns/{grn_id}/lines` | Thêm một dòng đếm (201) | NH-2 (mức X) |
 
 ### 4. POST /api/v1/grns
 ### 5. GET /api/v1/grns
@@ -101,8 +101,8 @@ Gửi `asn_id` thì PO lấy từ ASN (nếu gửi cả hai phải khớp). Khô
 
 | Phương thức và đường dẫn | Mục đích | Quyền |
 |---|---|---|
-| `POST /grns/{grn_id}/submit` | Nộp phiếu đã đếm xong | NH-1 |
-| `POST /grns/{grn_id}/recount` | Đếm lại các dòng của phiếu đang chờ duyệt | NH-5 |
+| `POST /grns/{grn_id}/submit` | Nộp phiếu đã đếm xong | NH-1 (mức X) |
+| `POST /grns/{grn_id}/recount` | Đếm lại các dòng của phiếu đang chờ duyệt | NH-5 (mức X) |
 
 ### 8. POST /api/v1/grns/{grn_id}/submit
 
@@ -132,7 +132,7 @@ Lỗi: `INBOUND_GRN_EMPTY` 409, `INBOUND_OVER_RECEIPT` 409 (số hàng đạt c�
 
 | Phương thức và đường dẫn | Mục đích | Quyền |
 |---|---|---|
-| `POST /grns/{grn_id}/complete` | Nhập tồn, pallet STAGED, sinh task cất | NH-1 |
+| `POST /grns/{grn_id}/complete` | Nhập tồn, pallet STAGED, sinh task cất | NH-1 (mức X) |
 
 ### 10. POST /api/v1/grns/{grn_id}/complete
 
@@ -187,3 +187,5 @@ Chữ ký lấy từ code thật trên `develop`.
 `inventory` (A):
 - `apply_movement(db, warehouse_id, location_id, sku_id, lot_id, pallet_id, serial_number, tx_type, delta_available=0, delta_allocated=0, delta_counting=0, delta_locked=0, delta_damaged=0, ref_doc_type="MANUAL", ref_doc_id, performed_by, counterpart_location_id=None, expected_version=None)`. Inbound dùng với `tx_type="RECEIVE"`.
 - `transfer_inventory(db, warehouse_id, from_location_id, to_location_id, sku_id, lot_id, pallet_id, serial_number, qty, tx_type, ref_doc_type, ref_doc_id, performed_by, bucket)`. Inbound dùng với `tx_type="PUTAWAY"`, `bucket="AVAILABLE"`.
+
+`integrations` (A, A-07, PR #27): inbound đăng ký bộ xử lý nhận chứng từ ERP bằng `register_erp_handler("PO", handler)` và `register_erp_handler("ASN", handler)`, import từ `server.app.modules.integrations`. Chữ ký `handler(db, normalized: dict, actor_id: UUID) -> UUID`. Dữ liệu `normalized` đã đổi mã sang ID (gồm `warehouse_id`); các trường xem `docs/api/integrations.md` trên nhánh PR #27. Lỗi nghiệp vụ cứ `raise BusinessError`, integrations ghi `FAILED_BUSINESS` và trả mã lỗi của inbound cho ERP.
