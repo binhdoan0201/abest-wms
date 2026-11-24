@@ -6,6 +6,7 @@ Module khác đọc danh mục qua các hàm công khai dưới đây, không tr
 from server.app.modules.master_data.routers import router
 from server.app.modules.master_data.services import (
     MasterDataService,
+    find_by_code,
     get_location,
     get_sku,
     get_warehouse_config,
@@ -13,6 +14,7 @@ from server.app.modules.master_data.services import (
 
 __all__ = [
     "MasterDataService",
+    "find_by_code",
     "get_location",
     "get_sku",
     "get_warehouse_config",

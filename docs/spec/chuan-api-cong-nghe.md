@@ -98,7 +98,11 @@ Không có endpoint ghi tồn công khai: mọi thay đổi tồn đi qua `apply
 | POST | `/integrations/erp/asns` | ERP mock đẩy ASN | `admin` |
 | POST | `/integrations/erp/outbound-orders` | ERP mock đẩy SO | `admin` |
 | POST | `/integrations/erp/outbound-orders/{order_id}/changes` | ERP mock đổi hoặc hủy đơn (gọi `fn_receive_erp_order_change`) | `admin` |
-| GET | `/integrations/sync-logs` | Nhật ký đồng bộ | `quanly`, `admin` |
+| GET | `/integrations/sync-logs` | Nhật ký đồng bộ | `quanly`, `thukho`, `admin` |
+| POST | `/integrations/sync-logs/process`, `/integrations/sync-logs/{id}/retry`, `/integrations/sync-logs/{id}/resolve` | Chạy hàng đợi gửi ERP/TMS, thử lại, đánh dấu đã xử lý | `quanly`, `admin` |
+| POST | `/integrations/mock/failures` | Cấu hình lỗi giả lập ERP/TMS (chỉ dev) | `admin` |
+
+ERP gửi mã (kho, NCC, khách, SKU), không gửi ID nội bộ. `inbound`, `outbound` nhận chứng từ ERP qua `integrations.register_erp_handler`; chiều gửi đi dùng `integrations.enqueue_to_erp` và `request_waybill` (chi tiết `docs/api/integrations.md`).
 
 ### 4.5 `inbound` (B)
 
