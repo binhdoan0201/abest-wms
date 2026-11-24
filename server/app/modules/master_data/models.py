@@ -205,6 +205,9 @@ class Sku(Base):
         DateTime(timezone=True), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Migration 001: khối lượng, thể tích của 1 đơn vị base_uom
+    unit_weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    unit_volume_m3: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
 
 
 class SkuBarcode(Base):

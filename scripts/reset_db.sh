@@ -76,6 +76,12 @@ exec_sql_file "$DB_NAME" "database/schema.sql"
 echo "4. Nạp database/patch_v4_2_1.sql"
 exec_sql_file "$DB_NAME" "database/patch_v4_2_1.sql"
 
+# 4b. Nạp các migration theo số thứ tự (A cấp số, đặc tả 7.2.6)
+echo "4b. Nạp các file database/migrations/*.sql"
+for migration_file in $(ls database/migrations/*.sql 2>/dev/null | sort); do
+  exec_sql_file "$DB_NAME" "$migration_file"
+done
+
 # 5. Nạp mọi file seed theo thứ tự
 echo "5. Nạp các file database/seeds/*.sql"
 for seed_file in $(ls database/seeds/*.sql 2>/dev/null | sort); do

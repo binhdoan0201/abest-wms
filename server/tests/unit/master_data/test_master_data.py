@@ -9,7 +9,12 @@ from sqlalchemy import text
 from server.app.core.database import SessionLocal
 from server.app.core.exceptions import BusinessError
 from server.app.modules.inventory import has_stock
-from server.app.modules.master_data import get_location, get_sku, get_warehouse_config
+from server.app.modules.master_data import (
+    convert_to_base_uom,
+    get_location,
+    get_sku,
+    get_warehouse_config,
+)
 
 
 def test_public_read_functions_return_raw_types() -> None:
@@ -61,5 +66,28 @@ def test_has_stock_filters() -> None:
         if stocked is not None:
             assert has_stock(db, location_id=stocked[0]) is True
             assert has_stock(db, sku_id=stocked[1]) is True
+    finally:
+        db.close()
+
+
+def test_convert_to_base_uom_uses_barcode_factor() -> None:
+    """SKU-FOOD-001 có base_uom BOX và mã vạch thùng CTN = 12 BOX (seed 04)."""
+    db = SessionLocal()
+    try:
+        sku_id = db.execute(
+            text("SELECT sku_id FROM skus WHERE sku_code = 'SKU-FOOD-001'")
+        ).scalar_one()
+
+        assert convert_to_base_uom(db, sku_id, "CTN", Decimal("3")) == Decimal("36")
+        assert convert_to_base_uom(db, sku_id, "BOX", Decimal("5")) == Decimal("5")
+
+        with pytest.raises(BusinessError) as exc:
+            convert_to_base_uom(db, sku_id, "PALLET", Decimal("1"))
+        assert exc.value.code == "MASTER_DATA_UOM_NOT_CONVERTIBLE"
+        assert exc.value.http_status == 422
+
+        with pytest.raises(BusinessError) as exc:
+            convert_to_base_uom(db, uuid.uuid4(), "BOX", Decimal("1"))
+        assert exc.value.code == "NOT_FOUND"
     finally:
         db.close()
