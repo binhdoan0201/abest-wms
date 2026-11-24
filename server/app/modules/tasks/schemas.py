@@ -3,25 +3,67 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+TaskTypeLiteral = Literal[
+    "RECEIVING",
+    "PUTAWAY",
+    "PICKING",
+    "PACKING",
+    "CYCLE_COUNT",
+    "RECOUNT",
+    "RETURN_PICKING",
+    "INTERNAL_MOVE",
+    "RETURN_TO_SHELF",
+    "SCRAP_EXECUTION",
+]
+
+WorkStageLiteral = Literal[
+    "NHAN_HANG",
+    "CAT_HANG",
+    "SOAN_HANG",
+    "DONG_GOI_XUAT",
+    "KIEM_KE",
+    "QUAN_LY_CHUNG",
+]
+
+TaskPriorityLiteral = Literal["NORMAL", "HIGH", "URGENT"]
 
 
 class CreateTaskRequest(BaseModel):
     """Dữ liệu yêu cầu tạo nhiệm vụ."""
 
-    task_type: str = Field(..., description="Loại task: RECEIVING, PUTAWAY, PICKING, PACKING...")
-    stage: str = Field(..., description="Công đoạn: NHAN_HANG, CAT_HANG, SOAN_HANG...")
-    ref_doc_type: str = Field(..., description="Loại chứng từ: PO, ASN, SO, GRN...")
+    task_type: TaskTypeLiteral = Field(
+        ...,
+        description=(
+            "Loại task: RECEIVING, PUTAWAY, PICKING, PACKING, CYCLE_COUNT, "
+            "RECOUNT, RETURN_PICKING, INTERNAL_MOVE, RETURN_TO_SHELF, SCRAP_EXECUTION"
+        ),
+    )
+    stage: WorkStageLiteral = Field(
+        ...,
+        description="Công đoạn làm việc (work_stage_type)",
+    )
+    ref_doc_type: str = Field(..., min_length=1, description="Loại chứng từ: PO, ASN, SO, GRN...")
     ref_doc_id: uuid.UUID = Field(..., description="ID chứng từ tham chiếu")
     zone_id: uuid.UUID | None = None
-    priority: str = Field("NORMAL", description="Độ ưu tiên: LOW, NORMAL, HIGH, URGENT")
+    priority: TaskPriorityLiteral = Field("NORMAL", description="Độ ưu tiên: NORMAL, HIGH, URGENT")
 
 
 class AssignTaskRequest(BaseModel):
     """Dữ liệu yêu cầu giao nhiệm vụ cho nhân viên."""
 
-    assigned_to: uuid.UUID = Field(..., description="ID nhân viên được giao")
+    assigned_to_user_id: uuid.UUID = Field(..., description="ID nhân viên được giao")
+    version_no: int = Field(..., description="Phiên bản lạc quan hiện tại")
+
+
+class ReassignTaskRequest(BaseModel):
+    """Dữ liệu yêu cầu điều chuyển nhiệm vụ sang nhân viên khác."""
+
+    new_assigned_to_user_id: uuid.UUID = Field(..., description="ID nhân viên nhận việc mới")
+    reason: str | None = Field(None, description="Lý do điều chuyển")
     version_no: int = Field(..., description="Phiên bản lạc quan hiện tại")
 
 
@@ -42,6 +84,13 @@ class CompleteTaskRequest(BaseModel):
     """Dữ liệu yêu cầu hoàn tất nhiệm vụ."""
 
     completed_qty: Decimal | None = None
+    version_no: int = Field(..., description="Phiên bản lạc quan hiện tại")
+
+
+class CancelTaskRequest(BaseModel):
+    """Dữ liệu yêu cầu hủy nhiệm vụ."""
+
+    cancel_reason: str | None = Field(None, description="Lý do hủy nhiệm vụ")
     version_no: int = Field(..., description="Phiên bản lạc quan hiện tại")
 
 

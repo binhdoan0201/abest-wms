@@ -306,7 +306,7 @@ def test_tasks_lifecycle_state_machine_and_worker_isolation(db_session: Session)
     # 3. Sai version_no: Giao task với version_no sai (ví dụ: 99) -> 409 VERSION_CONFLICT
     conflict_assign = client.post(
         f"/api/v1/tasks/{task_id}/assign",
-        json={"assigned_to": str(soan_user_id), "version_no": 99},
+        json={"assigned_to_user_id": str(soan_user_id), "version_no": 99},
         headers={"Authorization": f"Bearer {thukho_token}"},
     )
     assert conflict_assign.status_code == 409
@@ -315,7 +315,7 @@ def test_tasks_lifecycle_state_machine_and_worker_isolation(db_session: Session)
     # 4. Giao task hợp lệ cho nv_soan với version_no = 1 -> ASSIGNED, version_no = 2
     assign_res = client.post(
         f"/api/v1/tasks/{task_id}/assign",
-        json={"assigned_to": str(soan_user_id), "version_no": 1},
+        json={"assigned_to_user_id": str(soan_user_id), "version_no": 1},
         headers={"Authorization": f"Bearer {thukho_token}"},
     )
     assert assign_res.status_code == 200
