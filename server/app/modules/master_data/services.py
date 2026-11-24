@@ -727,6 +727,39 @@ def get_sku(db: Session, sku_id: uuid.UUID) -> dict[str, Any]:
     return _raw_dict(sku)
 
 
+def convert_to_base_uom(db: Session, sku_id: uuid.UUID, uom_code: str, qty: Decimal) -> Decimal:
+    """Hàm công khai: quy đổi số lượng theo `uom_code` về đơn vị cơ sở `skus.base_uom`.
+
+    Quy tắc chuẩn API mục 2.3: tồn kho, sổ cái, cấp phát và so lệch luôn theo `base_uom`.
+    Hệ số lấy từ `sku_barcodes.conversion_factor` (1 đơn vị `uom_code` = hệ số x `base_uom`).
+    Ném `NOT_FOUND` nếu không có SKU; `MASTER_DATA_UOM_NOT_CONVERTIBLE` (422) nếu đơn vị chưa
+    có mã vạch quy đổi hoặc có nhiều hệ số mâu thuẫn.
+    """
+    sku = MasterDataRepository.get_by_pk(db, Sku, Sku.sku_id, sku_id)
+    if sku is None:
+        raise _not_found("SKU")
+    code = uom_code.strip()
+    if code == sku.base_uom:
+        return qty
+
+    factors = MasterDataRepository.get_conversion_factors(db, sku_id, code)
+    if len(factors) != 1:
+        reason = "chưa có mã vạch quy đổi" if not factors else "có nhiều hệ số khác nhau"
+        raise BusinessError(
+            code="MASTER_DATA_UOM_NOT_CONVERTIBLE",
+            message=f"Không quy đổi được đơn vị `{code}` về `{sku.base_uom}`: {reason}",
+            http_status=422,
+            details={
+                "sku_id": str(sku_id),
+                "uom_code": code,
+                "base_uom": sku.base_uom,
+                "factors": [str(f) for f in factors],
+            },
+        )
+    factor: Decimal = factors[0]
+    return qty * factor
+
+
 def get_location(db: Session, location_id: uuid.UUID, warehouse_id: uuid.UUID) -> dict[str, Any]:
     """Hàm công khai: thông tin vị trí thuộc kho chỉ định."""
     location = MasterDataRepository.get_by_pk(

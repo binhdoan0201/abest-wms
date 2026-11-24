@@ -15,6 +15,7 @@ from server.app.modules.master_data.models import (
     ItemCategory,
     Location,
     Sku,
+    SkuBarcode,
     Warehouse,
     WarehouseConfig,
     Zone,
@@ -95,6 +96,16 @@ class MasterDataRepository:
     def sku_exists(db: Session, sku_id: uuid.UUID) -> bool:
         """SKU có tồn tại hay không."""
         return db.execute(select(Sku.sku_id).where(Sku.sku_id == sku_id)).first() is not None
+
+    @staticmethod
+    def get_conversion_factors(db: Session, sku_id: uuid.UUID, uom_code: str) -> list[Any]:
+        """Các hệ số quy đổi khác nhau của một đơn vị tính trên mã vạch của SKU."""
+        stmt = (
+            select(SkuBarcode.conversion_factor)
+            .where(SkuBarcode.sku_id == sku_id, SkuBarcode.uom_code == uom_code)
+            .distinct()
+        )
+        return list(db.execute(stmt).scalars().all())
 
     @staticmethod
     def count_active_locations_in_zone(db: Session, zone_id: uuid.UUID) -> int:

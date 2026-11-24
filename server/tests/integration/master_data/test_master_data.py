@@ -107,13 +107,21 @@ def test_create_sku_defaults_numeric_as_string_and_duplicate(admin: dict[str, st
             "base_uom": "PCS",
             "unit_cost": "18500",
             "storage_requirement": "COLD",
+            "unit_weight_kg": "1.05",
         },
     )
     assert sku["unit_cost"] == "18500.0000"
+    assert sku["unit_weight_kg"] == "1.0500"
+    assert sku["unit_volume_m3"] is None
     assert sku["is_lot_tracked"] is True
     assert sku["is_expiry_tracked"] is True
     assert sku["is_serial_tracked"] is False
     assert sku["is_active"] is True
+
+    resp = client.patch(
+        f"/api/v1/skus/{sku['sku_id']}", headers=admin, json={"unit_volume_m3": "-1"}
+    )
+    assert resp.status_code == 422
 
     detail = client.get(f"/api/v1/skus/{sku['sku_id']}", headers=admin)
     assert detail.status_code == 200
