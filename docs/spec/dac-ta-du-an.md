@@ -23,6 +23,13 @@ Tài liệu gốc mô tả đầy đủ 178 chức năng, 27 quy tắc nghiệp 
 | Phê duyệt D1 → D2 → D3 với ngưỡng X/Y/Z | Ủy quyền duyệt, xác thực lại sinh trắc |
 | Kiểm kê đếm mù, đếm lại, điều chỉnh tồn | Báo cáo hiệu suất nhân viên, sự cố an toàn |
 | ERP/TMS giả lập (mock) | Hóa đơn điện tử, push notification FCM/APNs |
+| Soạn trực tiếp từ vị trí lưu trữ | Phân biệt ô soạn và khu lưu trữ, task bổ sung hàng cho ô soạn |
+| Chặn hàng qua trạng thái pallet, vị trí | Khóa lô (thu hồi, chờ kiểm chất lượng) ở mọi vị trí |
+| Duyệt chênh lệch nhận hàng nội bộ (D1 đến D3) | Khiếu nại NCC khi nhận thiếu, hư; đối chiếu 3 bên PO, phiếu nhận, hóa đơn |
+| Chuyển kho qua GI `INTER_WH_TRANSFER` và ASN kho nhận | Theo dõi tồn «đang chuyển» giữa hai kho (hiện ERP giữ) |
+| Đồng bộ từng giao dịch sang ERP (`integration_sync_logs`) | Đối soát tổng tồn WMS với ERP cuối ngày, cuối kỳ |
+
+Các mục bổ sung cuối bảng lấy từ báo cáo `docs/reports/r1-ra-soat-nghiep-vu.md` mục 3.
 
 ### 1.3 Thuật ngữ chính
 
