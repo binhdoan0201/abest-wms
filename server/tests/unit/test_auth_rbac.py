@@ -42,14 +42,17 @@ from server.app.main import app
 # ---------------------------------------------------------------------------
 dummy_rbac_router = APIRouter(prefix="/test-rbac", tags=["Test RBAC"])
 
-ALL_14_PERMISSIONS = [
+ALL_PERMISSIONS = [
     "AD-1",
     "CAT-1",
     "DG-1",
     "KK-1",
     "NH-1",
+    "NH-2",
+    "NH-5",
     "QL-1.1",
     "QL-2.1",
+    "QL-2.3",
     "QL-5.3",
     "QL-8.1",
     "QL-9.10",
@@ -66,7 +69,7 @@ def _build_perm_route(code: str) -> None:
         return success_response(data={"permission": code, "access_type": access_type})
 
 
-for perm_code in ALL_14_PERMISSIONS:
+for perm_code in ALL_PERMISSIONS:
     _build_perm_route(perm_code)
 
 
@@ -183,7 +186,7 @@ def test_parameterized_role_permissions_matrix(db_session: Session) -> None:
         token = tokens[role_code]
         headers = {"Authorization": f"Bearer {token}"}
 
-        for perm in ALL_14_PERMISSIONS:
+        for perm in ALL_PERMISSIONS:
             endpoint = f"/test-rbac/perm/{perm}"
             res = client.get(endpoint, headers=headers)
 
@@ -205,6 +208,27 @@ def test_parameterized_role_permissions_matrix(db_session: Session) -> None:
                         res.status_code == 403
                     ), f"Vai trò {role_code} không có quyền {perm} nhưng lại truy cập được"
                     assert res.json()["error"]["code"] == "FORBIDDEN"
+
+
+# Mã con là bước nghiệp vụ cùng dòng ma trận (slide 90) với mã cha, phải được cấp giống hệt.
+CHILD_TO_PARENT_PERMISSION = {"NH-2": "NH-1", "NH-5": "NH-1", "QL-2.3": "QL-2.1"}
+
+
+def test_child_permissions_mirror_parent_row(db_session: Session) -> None:
+    """Mã con có đúng tập (vai trò, mức truy cập) như mã cha trong ma trận phân quyền."""
+    rows = db_session.execute(
+        text(
+            "SELECT r.role_code, rp.permission_code, rp.access_type "
+            "FROM roles r JOIN role_permissions rp ON r.role_id = rp.role_id"
+        )
+    ).fetchall()
+
+    def grants(code: str) -> set[tuple[str, str]]:
+        return {(r[0], r[2]) for r in rows if r[1] == code}
+
+    for child, parent in CHILD_TO_PARENT_PERMISSION.items():
+        assert grants(child), f"Mã {child} chưa được cấp cho vai trò nào"
+        assert grants(child) == grants(parent), f"{child} lệch quyền so với {parent}"
 
 
 def test_invalid_credentials_and_token_errors() -> None:
