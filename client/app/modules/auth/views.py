@@ -5,7 +5,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from client.app.core.api_client import ApiClient, ClientApiError
-from client.app.core.auth_guard import get_optional_user
+from client.app.core.auth_guard import get_optional_user, home_path
 from client.app.core.session import clear_session_cookie, set_session_cookie
 
 router = APIRouter(tags=["Auth Views"])
@@ -21,7 +21,7 @@ def login_page(request: Request) -> Response:
     """Hiển thị trang đăng nhập. Nếu đã đăng nhập thì chuyển hướng vào hệ thống."""
     user = get_optional_user(request)
     if user:
-        return RedirectResponse(url="/inventory", status_code=303)
+        return RedirectResponse(url=home_path(user), status_code=303)
 
     templates = get_templates(request)
     return templates.TemplateResponse(
@@ -61,8 +61,8 @@ def login_action(
                 status_code=400,
             )
 
-        # Chuyển hướng tới trang tồn kho hoặc trang chủ
-        redirect_resp = RedirectResponse(url="/inventory", status_code=303)
+        # Chuyển hướng tới trang đầu theo vai trò
+        redirect_resp = RedirectResponse(url=home_path(token_data.get("user")), status_code=303)
         set_session_cookie(redirect_resp, token)
         return redirect_resp
 
