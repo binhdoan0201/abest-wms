@@ -81,6 +81,7 @@ def outbound_allocate_htmx(
     request: Request,
     order_id: str,
     strategy: str = Form(default="FEFO"),
+    version_no: int = Form(default=1),
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Response:
     """HTMX action cấp phát tồn kho FEFO/FIFO trực tiếp từ giao diện danh sách đơn."""
@@ -92,7 +93,7 @@ def outbound_allocate_htmx(
     api_error: dict[str, str] | None = None
 
     try:
-        api.post(f"/outbound-orders/{order_id}/allocate", json_data={"strategy": strategy})
+        api.post(f"/outbound-orders/{order_id}/allocate", json_data={"strategy": strategy, "version_no": version_no})
         flash_msg = "Đã cấp phát tồn kho thành công!"
     except ClientApiError as exc:
         api_error = {"code": exc.code, "message": exc.message}

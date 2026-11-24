@@ -118,9 +118,10 @@ class OutboundRepository:
         return items, total
 
     @staticmethod
-    def get_order_raw(db: Session, order_id: uuid.UUID) -> dict[str, Any] | None:
+    def get_order_raw(db: Session, order_id: uuid.UUID, for_update: bool = False) -> dict[str, Any] | None:
+        lock_sql = 'FOR UPDATE OF o' if for_update else ''
         stmt = text(
-            """
+            f"""
             SELECT
                 o.order_id,
                 o.erp_order_number,
@@ -143,7 +144,8 @@ class OutboundRepository:
                 o.updated_at
             FROM outbound_orders o
             LEFT JOIN customers c ON c.customer_id = o.customer_id
-            WHERE o.order_id = :order_id;
+            WHERE o.order_id = :order_id
+            {lock_sql};
             """
         )
         row = db.execute(stmt, {"order_id": order_id}).mappings().first()
@@ -475,9 +477,10 @@ class OutboundRepository:
         return dict(row)
 
     @staticmethod
-    def get_pick_session_raw(db: Session, pick_session_id: uuid.UUID) -> dict[str, Any] | None:
+    def get_pick_session_raw(db: Session, pick_session_id: uuid.UUID, for_update: bool = False) -> dict[str, Any] | None:
+        lock_sql = 'FOR UPDATE OF ps' if for_update else ''
         stmt = text(
-            """
+            f"""
             SELECT
                 ps.pick_session_id,
                 ps.warehouse_id,
@@ -492,7 +495,8 @@ class OutboundRepository:
                 ps.created_at
             FROM pick_sessions ps
             LEFT JOIN users u ON u.user_id = ps.picker_user_id
-            WHERE ps.pick_session_id = :pick_session_id;
+            WHERE ps.pick_session_id = :pick_session_id
+            {lock_sql};
             """
         )
         row = db.execute(stmt, {"pick_session_id": pick_session_id}).mappings().first()
@@ -711,8 +715,11 @@ class OutboundRepository:
         db.execute(
             text(
                 """
+                UPDATE inventory_allocations ia SET status = 'CANCELLED' FROM pick_lines pl WHERE pl.pick_line_id = :pick_line_id AND ia.allocation_id = pl.allocation_id;
+                """), {"pick_line_id": pick_line_id}); db.execute(text("""
                 UPDATE outbound_orders
-                SET delay_reason = 'SHORTAGE',
+                SET status = CAST('ON_HOLD' AS order_status_type),
+                    delay_reason = 'SHORTAGE',
                     version_no = version_no + 1,
                     updated_at = NOW()
                 WHERE order_id = :order_id;
@@ -811,6 +818,7 @@ class OutboundRepository:
                     {"order_id": oid},
                 )
 
+        OutboundRepository.sync_picking_task_status(db, pick_session_id, new_ps_status)
         return dict(ps_row)
 
     @staticmethod
@@ -1201,3 +1209,27 @@ class OutboundRepository:
                 "note": note,
             },
         )
+
+    @staticmethod
+    def validate_picker_user(db: Session, picker_user_id: uuid.UUID, warehouse_id: uuid.UUID) -> bool:
+        stmt = text("SELECT 1 FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.user_id = :pid AND u.is_active = TRUE AND r.role_code = 'nv-soan' AND (u.warehouse_id IS NULL OR u.warehouse_id = :wid);")
+        return db.execute(stmt, {"pid": picker_user_id, "wid": warehouse_id}).scalar_one_or_none() is not None
+
+    @staticmethod
+    def create_picking_task(db: Session, warehouse_id: uuid.UUID, pick_session_id: uuid.UUID, assigned_to: uuid.UUID, priority_score: int = 50) -> uuid.UUID:
+        prio_label = "HIGH" if priority_score >= 80 else "NORMAL"
+        stmt = text("INSERT INTO tasks (warehouse_id, task_type, stage, ref_doc_type, ref_doc_id, priority, status, assigned_to, assigned_by) VALUES (:wid, CAST('PICKING' AS task_type), CAST('SOAN_HANG' AS work_stage_type), 'PICK_SESSION', :psid, CAST(:prio AS task_priority_type), CAST('ASSIGNED' AS task_status_type), :uid, :uid) RETURNING task_id;")
+        return uuid.UUID(str(db.execute(stmt, {"wid": warehouse_id, "psid": pick_session_id, "uid": assigned_to, "prio": prio_label}).scalar_one()))
+
+    @staticmethod
+    def sync_picking_task_status(db: Session, pick_session_id: uuid.UUID, task_status: str) -> None:
+        db.execute(text("UPDATE tasks SET status = CAST(:st AS task_status_type), started_at = CASE WHEN :st = 'IN_PROGRESS' THEN COALESCE(started_at, NOW()) ELSE started_at END, completed_at = CASE WHEN :st = 'COMPLETED' THEN NOW() ELSE completed_at END, version_no = version_no + 1 WHERE ref_doc_type = 'PICK_SESSION' AND ref_doc_id = :psid;"), {"psid": pick_session_id, "st": task_status})
+
+    @staticmethod
+    def find_lot_balance_at_location(db: Session, location_id: uuid.UUID, sku_id: uuid.UUID, lot_id: uuid.UUID, required_qty: Decimal) -> dict[str, Any] | None:
+        row = db.execute(text("SELECT balance_id, lot_id, location_id, qty_available FROM inventory_balances WHERE location_id = :loc AND sku_id = :sku AND lot_id = :lot AND inventory_status = 'AVAILABLE' AND qty_available >= :qty LIMIT 1 FOR UPDATE;"), {"loc": location_id, "sku": sku_id, "lot": lot_id, "qty": required_qty}).mappings().first()
+        return dict(row) if row else None
+
+    @staticmethod
+    def swap_allocation_balance(db: Session, allocation_id: uuid.UUID, new_balance_id: uuid.UUID, new_lot_id: uuid.UUID) -> None:
+        db.execute(text("UPDATE inventory_allocations SET balance_id = :nb, lot_id = :nl WHERE allocation_id = :aid;"), {"aid": allocation_id, "nb": new_balance_id, "nl": new_lot_id})

@@ -38,14 +38,15 @@
         <td class="px-4 py-3 text-slate-600">{{ o.customer_name or '-' }}</td>
         <td class="px-4 py-3 text-slate-600">{{ o.cutoff_time or '-' }}</td>
         <td class="px-4 py-3">
-          <span class="inline-flex rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
-            {{ o.status }}
+          <span class="inline-flex rounded-full {% if o.status == 'ON_HOLD' %}bg-rose-50 text-rose-700{% else %}bg-blue-50 text-blue-700{% endif %} px-2.5 py-0.5 text-xs font-semibold">
+            {{ o.status }}{% if o.delay_reason %} ({{ o.delay_reason }}){% endif %}
           </span>
         </td>
         <td class="px-4 py-3 text-right">
           {% if o.status == 'NEW' and not o.erp_change_pending %}
           <button
             hx-post="/outbound/orders/{{ o.order_id }}/allocate"
+            hx-vals='{"version_no": {{ o.version_no }}, "strategy": "FEFO"}'
             hx-target="#outbound-orders-container"
             hx-swap="innerHTML"
             class="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700">

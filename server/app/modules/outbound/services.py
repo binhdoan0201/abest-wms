@@ -102,7 +102,7 @@ class OutboundService:
         user_ctx: UserContext,
         order_id: uuid.UUID,
     ) -> dict[str, Any]:
-        order = OutboundRepository.get_order_raw(db, order_id)
+        order = OutboundRepository.get_order_raw(db, order_id, for_update=True)
         if not order:
             raise BusinessError(
                 code="NOT_FOUND",
@@ -194,7 +194,7 @@ class OutboundService:
         order_id: uuid.UUID,
         req: AllocateOrderRequest,
     ) -> dict[str, Any]:
-        order = OutboundRepository.get_order_raw(db, order_id)
+        order = OutboundRepository.get_order_raw(db, order_id, for_update=True)
         if not order:
             raise BusinessError(
                 code="NOT_FOUND",
@@ -340,6 +340,7 @@ class OutboundService:
             new_version = OutboundRepository.bump_order_version(
                 db=db,
                 order_id=order_id,
+                new_status="ON_HOLD" if has_shortage else None,
                 delay_reason="SHORTAGE" if has_shortage else None,
             )
 
@@ -360,7 +361,7 @@ class OutboundService:
 
         return {
             "order_id": str(order_id),
-            "status": order["status"],
+            "status": "ON_HOLD" if has_shortage else order["status"],
             "has_shortage": has_shortage,
             "version_no": new_version,
             "allocations": created_allocs,
@@ -387,10 +388,12 @@ class OutboundService:
             )
 
         picker_id = req.picker_user_id or user_ctx.user_id
+        if req.picker_user_id and not OutboundRepository.validate_picker_user(db, req.picker_user_id, user_ctx.warehouse_id):
+            raise BusinessError(code="OUTBOUND_INVALID_PICKER", message="Nhân viên soạn hàng không hợp lệ hoặc không thuộc vai trò nv-soan tại kho này", http_status=400)
         orders_to_pick: list[dict[str, Any]] = []
 
         for oid in req.order_ids:
-            order = OutboundRepository.get_order_raw(db, oid)
+            order = OutboundRepository.get_order_raw(db, oid, for_update=True)
             if not order:
                 raise BusinessError(
                     code="NOT_FOUND",
@@ -485,6 +488,11 @@ class OutboundService:
                     new_status="PICKING",
                 )
 
+            has_urgent = any(bool(item["order"].get("is_urgent")) for item in orders_to_pick)
+            task_id = OutboundRepository.create_picking_task(
+                db=db, warehouse_id=user_ctx.warehouse_id, pick_session_id=pick_session_id,
+                assigned_to=picker_id, priority_score=90 if has_urgent else 50,
+            )
             create_audit_log(
                 db=db,
                 action_code="CREATE_PICK_SESSION",
@@ -578,7 +586,7 @@ class OutboundService:
         pick_line_id: uuid.UUID,
         req: ConfirmPickLineRequest,
     ) -> dict[str, Any]:
-        ps = OutboundRepository.get_pick_session_raw(db, pick_session_id)
+        ps = OutboundRepository.get_pick_session_raw(db, pick_session_id, for_update=True)
         if not ps:
             raise BusinessError(
                 code="NOT_FOUND",
@@ -645,6 +653,16 @@ class OutboundService:
         )
 
         try:
+            suggested_lot = uuid.UUID(str(line["suggested_lot_id"])) if line["suggested_lot_id"] else None
+            if req.actual_lot_id and req.actual_lot_id != suggested_lot and line["allocation_id"]:
+                alt_bal = OutboundRepository.find_lot_balance_at_location(
+                    db, source_location_id, uuid.UUID(str(line["sku_id"])), req.actual_lot_id, req.qty_picked
+                )
+                if not alt_bal:
+                    raise BusinessError(code="OUTBOUND_INVALID_ACTUAL_LOT", message="Lô thực tế không đủ tồn khả dụng tại vị trí kệ đang lấy", http_status=409)
+                reserve_inventory(db=db, balance_id=uuid.UUID(str(line["balance_id"])), delta_available=req.qty_picked, delta_allocated=-req.qty_picked, ref_doc_type="PICK_SESSION", ref_doc_id=pick_session_id, performed_by=user_ctx.user_id)
+                reserve_inventory(db=db, balance_id=uuid.UUID(str(alt_bal["balance_id"])), delta_available=-req.qty_picked, delta_allocated=req.qty_picked, ref_doc_type="PICK_SESSION", ref_doc_id=pick_session_id, performed_by=user_ctx.user_id)
+                OutboundRepository.swap_allocation_balance(db, uuid.UUID(str(line["allocation_id"])), uuid.UUID(str(alt_bal["balance_id"])), req.actual_lot_id)
             # Chuyển hàng ALLOCATED từ vị trí kệ sang vị trí STAGING (nếu khác vị trí)
             if staged_location_id and staged_location_id != source_location_id:
                 transfer_inventory(
@@ -717,7 +735,7 @@ class OutboundService:
         pick_line_id: uuid.UUID,
         req: PickLineExceptionRequest,
     ) -> dict[str, Any]:
-        ps = OutboundRepository.get_pick_session_raw(db, pick_session_id)
+        ps = OutboundRepository.get_pick_session_raw(db, pick_session_id, for_update=True)
         if not ps:
             raise BusinessError(
                 code="NOT_FOUND",
@@ -755,6 +773,9 @@ class OutboundService:
         exc_type = req.exception_type if req.exception_type in allowed_types else "EXCEPTION_SHORT"
 
         try:
+            qty_short = Decimal(str(line["qty_to_pick"])) - req.qty_actual
+            if qty_short > Decimal("0") and line.get("balance_id"):
+                reserve_inventory(db=db, balance_id=uuid.UUID(str(line["balance_id"])), delta_available=qty_short, delta_allocated=-qty_short, ref_doc_type="PICK_SESSION", ref_doc_id=pick_session_id, performed_by=user_ctx.user_id)
             OutboundRepository.record_pick_line_exception_db(
                 db=db,
                 pick_line_id=pick_line_id,
@@ -797,7 +818,7 @@ class OutboundService:
         order_id: uuid.UUID,
         req: CreatePackageRequest,
     ) -> dict[str, Any]:
-        order = OutboundRepository.get_order_raw(db, order_id)
+        order = OutboundRepository.get_order_raw(db, order_id, for_update=True)
         if not order:
             raise BusinessError(
                 code="NOT_FOUND",
