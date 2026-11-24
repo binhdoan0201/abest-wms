@@ -9,7 +9,7 @@
 
 ## Quy ước chung
 
-Tiền tố: `/api/v1`. Response theo chuẩn `docs/spec/chuan-api-cong-nghe.md` mục 2. Số lượng là **chuỗi** (`"6.000"`), số tiền là chuỗi 2 chữ số thập phân (`"200000.00"`). Mọi endpoint ghi dùng `version_no` làm khóa lạc quan: lệch trả `409 VERSION_CONFLICT` kèm `details.current_version_no`.
+Tiền tố: `/api/v1`. Response theo chuẩn `docs/spec/chuan-api-cong-nghe.md` mục 2. Số lượng là **chuỗi** (`"6.000"`), số tiền là chuỗi 2 chữ số thập phân (`"200000.00"`). Mọi endpoint ghi trên phiếu đã có dùng `version_no` làm khóa lạc quan: lệch trả `409 VERSION_CONFLICT` kèm `details.current_version_no`.
 
 ## 1. Luồng tổng quan
 
@@ -34,38 +34,36 @@ nv-nhan chỉ thấy và thao tác phiếu do chính mình nhận (`403 FORBIDDE
 
 ## 3. PO và ASN (B-03)
 
-| Phương thức và đường dẫn | Mục đích | Quyền (mã chờ chốt, xem ghi chú dưới) |
+| Phương thức và đường dẫn | Mục đích | Quyền |
 |---|---|---|
 | `GET /purchase-orders` | Danh sách PO; lọc `status`, `supplier_id`; sắp xếp `created_at`, `expected_date`, `erp_po_number` | QL-2.1 |
 | `GET /purchase-orders/{po_id}` | Chi tiết kèm dòng (số lượng ẩn với nv-nhan) | QL-2.1 |
 | `GET /asns` | Danh sách ASN; lọc `status`, `po_id` | QL-2.3 |
-| `GET /asns/{asn_id}` | Chi tiết ASN | QL-2.3 |
 
-> **Ghi chú mã quyền (chờ chốt với A).** Seed `01_roles_permissions.sql` hiện chỉ có `NH-1` và `QL-2.1`. Các mã `NH-2`, `NH-5`, `CT-1`, `QL-2.3` dùng trong tài liệu này **chưa có trong seed**; nếu dùng vào `require_permission` thì mọi người nhận `403`. Cách xử lý (bổ sung mã vào seed hoặc dùng mã đã có) do A xác nhận; tài liệu sẽ cập nhật theo.
+> **Mã quyền.** `NH-2` và `NH-5` cấp giống `NH-1` (nv-nhan X, thukho V, quanly V); `QL-2.3` cấp giống `QL-2.1` (thukho V, quanly V); cất hàng dùng `CAT-1`. Các mã này được thêm vào seed ở PR #28.
 
 PO và ASN **không có endpoint tạo**: ERP mock đẩy sang, router tích hợp của A gọi hai hàm công khai `inbound.receive_purchase_order(db, warehouse_id, data, actor_id)` và `inbound.receive_asn(...)`.
 
 ### 1. GET /api/v1/purchase-orders
 ### 2. GET /api/v1/purchase-orders/{po_id}
 ### 3. GET /api/v1/asns
-### 4. GET /api/v1/asns/{asn_id}
 
 Lỗi: `INBOUND_PO_DUPLICATE` 409, `INBOUND_ASN_DUPLICATE` 409, `NOT_FOUND` 404 (NCC, SKU, cửa nhận, khu nhận không hợp lệ).
 
-ASN do chuyển kho (cột `source_outbound_order_id`, patch v4.2.1) cũng đọc được qua hai endpoint này. Schema chưa có bảng dòng ASN, nên khi nhận chỉ theo ASN (không PO) mọi dòng đếm bị coi là ngoài dự kiến và luôn đi vào duyệt.
+ASN do chuyển kho (cột `source_outbound_order_id`, patch v4.2.1) cũng đọc được qua `GET /asns`. Schema chưa có bảng dòng ASN, nên khi nhận chỉ theo ASN (không PO) mọi dòng đếm bị coi là ngoài dự kiến và luôn đi vào duyệt.
 
 ## 4. Phiếu nhận GRN (B-04)
 
-| Phương thức và đường dẫn | Mục đích | Quyền (mã chờ chốt, xem ghi chú dưới) |
+| Phương thức và đường dẫn | Mục đích | Quyền |
 |---|---|---|
 | `POST /grns` | Mở phiếu từ PO hoặc ASN (201) | NH-1 |
 | `GET /grns` | Danh sách; lọc `status`, `po_id`; nv-nhan chỉ thấy phiếu của mình | NH-1 |
 | `GET /grns/{grn_id}` | Chi tiết kèm dòng | NH-1 |
 | `POST /grns/{grn_id}/lines` | Thêm một dòng đếm (201) | NH-2 |
 
-### 5. POST /api/v1/grns
-### 6. GET /api/v1/grns
-### 7. GET /api/v1/grns/{grn_id}
+### 4. POST /api/v1/grns
+### 5. GET /api/v1/grns
+### 6. GET /api/v1/grns/{grn_id}
 
 Chi tiết `POST /grns`:
 ```
@@ -73,7 +71,7 @@ Chi tiết `POST /grns`:
 ```
 Gửi `asn_id` thì PO lấy từ ASN (nếu gửi cả hai phải khớp). Không gửi cả hai là nhận không chứng từ: chỉ được khi `blind_receipt_policy` của kho là `WARN_HOLD_D1` (khi đó phiếu luôn phải duyệt D1), còn `REJECT` trả `409 INBOUND_NO_PO_NOT_ALLOWED`. Phiếu mở ở trạng thái `COUNTING`; PO chuyển `RECEIVING`, ASN chuyển `RECEIVING`.
 
-### 8. POST /api/v1/grns/{grn_id}/lines
+### 7. POST /api/v1/grns/{grn_id}/lines
 ```
 {"sku_id": "…", "lot_number": "L240901", "expiry_date": "2027-09-01", "manufacture_date": null,
  "uom_code": "PCS", "qty_actual": "6", "qty_damaged": "1", "reason_code": "DAMAGED",
@@ -101,12 +99,12 @@ Gửi `asn_id` thì PO lấy từ ASN (nếu gửi cả hai phải khớp). Khô
 
 ## 5. Xử lý lệch và đếm lại (B-05)
 
-| Phương thức và đường dẫn | Mục đích | Quyền (mã chờ chốt, xem ghi chú dưới) |
+| Phương thức và đường dẫn | Mục đích | Quyền |
 |---|---|---|
 | `POST /grns/{grn_id}/submit` | Nộp phiếu đã đếm xong | NH-1 |
 | `POST /grns/{grn_id}/recount` | Đếm lại các dòng của phiếu đang chờ duyệt | NH-5 |
 
-### 9. POST /api/v1/grns/{grn_id}/submit
+### 8. POST /api/v1/grns/{grn_id}/submit
 
 Body `{"version_no": 4}`.
 
@@ -122,7 +120,7 @@ Buộc duyệt (kể cả lệch bằng 0 hay nằm trong dung sai): có hàng h
 ```
 `outcome` là `AUTO_APPROVED` (status `APPROVED`, `tier` null hoặc `AUTO_TOLERANCE_Z`) hoặc `PENDING_APPROVAL`. Gửi duyệt thì mỗi dòng có hàng đạt được gắn pallet `QUARANTINE_HOLD`, hàng hư gắn pallet `DAMAGED_HOLD`, `grn_lines.is_quarantined = true`, **chưa nhập tồn**. Nếu từ chối, trigger chuyển pallet `QUARANTINE_HOLD` sang `REJECTED_PENDING_RETURN`.
 
-### 10. POST /api/v1/grns/{grn_id}/recount
+### 9. POST /api/v1/grns/{grn_id}/recount
 ```
 {"version_no": 6, "lines": [{"grn_line_id": "…", "qty_actual": "10", "qty_damaged": "0"}]}
 ```
@@ -132,11 +130,11 @@ Lỗi: `INBOUND_GRN_EMPTY` 409, `INBOUND_OVER_RECEIPT` 409 (số hàng đạt c�
 
 ## 6. Hoàn tất GRN (B-06)
 
-| Phương thức và đường dẫn | Mục đích | Quyền (mã chờ chốt, xem ghi chú dưới) |
+| Phương thức và đường dẫn | Mục đích | Quyền |
 |---|---|---|
 | `POST /grns/{grn_id}/complete` | Nhập tồn, pallet STAGED, sinh task cất | NH-1 |
 
-### 11. POST /api/v1/grns/{grn_id}/complete
+### 10. POST /api/v1/grns/{grn_id}/complete
 
 Vai trò: `nv-nhan`, đúng chuẩn API mục 4.5. Phần ghi tồn sau khi duyệt GRN do `inbound` làm (chốt việc còn treo từ PR #15).
 
@@ -154,17 +152,17 @@ Lỗi: `INBOUND_GRN_NOT_APPROVED` 409 (chưa duyệt hoặc đã hoàn tất), `
 
 ## 7. Cất hàng (B-07)
 
-| Phương thức và đường dẫn | Mục đích | Quyền (mã chờ chốt, xem ghi chú dưới) |
+| Phương thức và đường dẫn | Mục đích | Quyền |
 |---|---|---|
-| `POST /putaway/suggest` | Gợi ý vị trí cất | CT-1 |
-| `POST /pallets/{pallet_id}/putaway` | Xác nhận cất | CT-1 |
+| `POST /putaway/suggest` | Gợi ý vị trí cất | CAT-1 |
+| `POST /pallets/{pallet_id}/putaway` | Xác nhận cất | CAT-1 |
 
-### 12. POST /api/v1/putaway/suggest
+### 11. POST /api/v1/putaway/suggest
 
 Body `{"pallet_id": "…"}`.
 Trả tối đa 5 vị trí: khu đúng yêu cầu bảo quản (`NORMAL` vào `STORAGE`, `COLD` vào `COLD`, `HAZMAT` vào `HAZMAT`; pallet trộn lấy yêu cầu khắt khe nhất), vị trí `EMPTY` hoặc `PARTIAL`, đang hoạt động, loại trừ vị trí hiện tại. Thứ tự: nơi đã có cùng SKU trước (gom hàng), rồi nơi đã đầy hơn, rồi theo mã vị trí.
 
-### 13. POST /api/v1/pallets/{pallet_id}/putaway
+### 12. POST /api/v1/pallets/{pallet_id}/putaway
 ```
 {"location_id": "…", "scanned_pallet_code": "GRN-…-P01", "scanned_location_barcode": "A-01-02",
  "lines": null, "version_no": 2}
@@ -187,5 +185,5 @@ Chữ ký lấy từ code thật trên `develop`.
 `master_data` (A, PR #17): `get_warehouse_config(db, warehouse_id)` trả dict (NUMERIC giữ kiểu `Decimal`); ngoài ra có `get_sku`, `get_location`.
 
 `inventory` (A):
-- `apply_movement(db, warehouse_id, location_id, sku_id, lot_id, pallet_id, serial_number, tx_type, delta_available=0, delta_allocated=0, delta_counting=0, delta_locked=0, delta_damaged=0, ref_doc_type="MANUAL", ref_doc_id, performed_by)`. Inbound dùng với `tx_type="RECEIVE"`.
-- `transfer_inventory(db, warehouse_id, from_location_id, to_location_id, sku_id, lot_id, pallet_id, serial_number, qty, tx_type, ref_doc_type, ref_doc_id, performed_by, bucket)`. Inbound dùng với `tx_type="PUTAWAY"`, `bucket="AVAILABLE"`. *(Tên tham số theo lời gọi hiện tại của inbound; đối chiếu lại với `server/app/modules/inventory/services.py` trên `develop` trước khi gộp.)*
+- `apply_movement(db, warehouse_id, location_id, sku_id, lot_id, pallet_id, serial_number, tx_type, delta_available=0, delta_allocated=0, delta_counting=0, delta_locked=0, delta_damaged=0, ref_doc_type="MANUAL", ref_doc_id, performed_by, counterpart_location_id=None, expected_version=None)`. Inbound dùng với `tx_type="RECEIVE"`.
+- `transfer_inventory(db, warehouse_id, from_location_id, to_location_id, sku_id, lot_id, pallet_id, serial_number, qty, tx_type, ref_doc_type, ref_doc_id, performed_by, bucket)`. Inbound dùng với `tx_type="PUTAWAY"`, `bucket="AVAILABLE"`.
