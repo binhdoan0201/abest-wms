@@ -719,7 +719,21 @@ class OutboundRepository:
         db.execute(
             text(
                 """
-                UPDATE inventory_allocations ia SET status = 'CANCELLED'
+                UPDATE outbound_order_lines ool
+                SET qty_allocated = GREATEST(0, ool.qty_allocated - ia.qty_allocated)
+                FROM pick_lines pl
+                JOIN inventory_allocations ia ON ia.allocation_id = pl.allocation_id
+                WHERE pl.pick_line_id = :pick_line_id
+                  AND ool.order_line_id = ia.order_line_id
+                  AND ia.status = 'ACTIVE';
+                """
+            ),
+            {"pick_line_id": pick_line_id},
+        )
+        db.execute(
+            text(
+                """
+                UPDATE inventory_allocations ia SET status = 'RELEASED'
                 FROM pick_lines pl
                 WHERE pl.pick_line_id = :pick_line_id AND ia.allocation_id = pl.allocation_id;
                 """
@@ -830,7 +844,6 @@ class OutboundRepository:
                     {"order_id": oid},
                 )
 
-        OutboundRepository.sync_picking_task_status(db, pick_session_id, new_ps_status)
         return dict(ps_row)
 
     @staticmethod
@@ -1024,7 +1037,9 @@ class OutboundRepository:
         return dict(refreshed)
 
     @staticmethod
-    def get_goods_issue_raw(db: Session, gi_id: uuid.UUID) -> dict[str, Any] | None:
+    def get_goods_issue_raw(
+        db: Session, gi_id: uuid.UUID, for_update: bool = False
+    ) -> dict[str, Any] | None:
         stmt = text(
             """
             SELECT
@@ -1228,68 +1243,14 @@ class OutboundRepository:
     ) -> bool:
         stmt = text(
             """
-            SELECT 1 FROM users u JOIN roles r ON r.role_id = u.role_id
-            WHERE u.user_id = :pid AND u.is_active = TRUE AND r.role_code = 'nv-soan'
-              AND (u.warehouse_id IS NULL OR u.warehouse_id = :wid);
+            SELECT 1 FROM users u JOIN roles r ON r.role_id = u.primary_role_id
+            WHERE u.user_id = :pid AND u.status = 'ACTIVE' AND r.role_code = 'nv-soan'
+              AND (u.primary_warehouse_id IS NULL OR u.primary_warehouse_id = :wid);
             """
         )
         return (
             db.execute(stmt, {"pid": picker_user_id, "wid": warehouse_id}).scalar_one_or_none()
             is not None
-        )
-
-    @staticmethod
-    def create_picking_task(
-        db: Session,
-        warehouse_id: uuid.UUID,
-        pick_session_id: uuid.UUID,
-        assigned_to: uuid.UUID,
-        priority_score: int = 50,
-    ) -> uuid.UUID:
-        prio_label = "HIGH" if priority_score >= 80 else "NORMAL"
-        stmt = text(
-            """
-            INSERT INTO tasks (
-                warehouse_id, task_type, stage, ref_doc_type, ref_doc_id,
-                priority, status, assigned_to, assigned_by
-            ) VALUES (
-                :wid, CAST('PICKING' AS task_type), CAST('SOAN_HANG' AS work_stage_type),
-                'PICK_SESSION', :psid, CAST(:prio AS task_priority_type),
-                CAST('ASSIGNED' AS task_status_type), :uid, :uid
-            ) RETURNING task_id;
-            """
-        )
-        return uuid.UUID(
-            str(
-                db.execute(
-                    stmt,
-                    {
-                        "wid": warehouse_id,
-                        "psid": pick_session_id,
-                        "uid": assigned_to,
-                        "prio": prio_label,
-                    },
-                ).scalar_one()
-            )
-        )
-
-    @staticmethod
-    def sync_picking_task_status(db: Session, pick_session_id: uuid.UUID, task_status: str) -> None:
-        db.execute(
-            text(
-                """
-                UPDATE tasks
-                SET status = CAST(:st AS task_status_type),
-                    started_at = CASE
-                        WHEN :st = 'IN_PROGRESS' THEN COALESCE(started_at, NOW())
-                        ELSE started_at
-                    END,
-                    completed_at = CASE WHEN :st = 'COMPLETED' THEN NOW() ELSE completed_at END,
-                    version_no = version_no + 1
-                WHERE ref_doc_type = 'PICK_SESSION' AND ref_doc_id = :psid;
-                """
-            ),
-            {"psid": pick_session_id, "st": task_status},
         )
 
     @staticmethod
@@ -1304,10 +1265,17 @@ class OutboundRepository:
             db.execute(
                 text(
                     """
-                    SELECT balance_id, lot_id, location_id, qty_available
+                    SELECT
+                        balance_id,
+                        lot_id,
+                        location_id,
+                        pallet_id,
+                        serial_number,
+                        qty_available
                     FROM inventory_balances
                     WHERE location_id = :loc AND sku_id = :sku AND lot_id = :lot
-                      AND inventory_status = 'AVAILABLE' AND qty_available >= :qty
+                      AND qty_available >= :qty
+                    ORDER BY pallet_id NULLS FIRST, serial_number NULLS FIRST
                     LIMIT 1 FOR UPDATE;
                     """
                 ),

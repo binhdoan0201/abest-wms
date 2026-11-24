@@ -66,3 +66,94 @@ def test_outbound_rbac_blocks_unauthorized_roles() -> None:
     )
     assert resp_decide.status_code == 403
     assert resp_decide.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_outbound_rbac_enforces_access_type_levels() -> None:
+    """Xác nhận mức quyền access_type (V vs X/G): quanly chỉ có quyền V ở DG-1 nên bị 403."""
+    quanly_token = _login("quanly")
+    resp_pkg = client.post(
+        f"/api/v1/outbound-orders/{uuid.uuid4()}/packages",
+        headers={"Authorization": f"Bearer {quanly_token}"},
+        json={"weight_kg": "2.0"},
+    )
+    assert resp_pkg.status_code == 403
+    assert resp_pkg.json()["error"]["code"] == "FORBIDDEN"
+
+    # nv_soan chỉ có mức X_OWN ở SO-1 nên không được tạo phiên soạn (yêu cầu mức G)
+    soan_token = _login("nv_soan")
+    resp_ps = client.post(
+        "/api/v1/pick-sessions",
+        headers={"Authorization": f"Bearer {soan_token}"},
+        json={"order_ids": [str(uuid.uuid4())]},
+    )
+    assert resp_ps.status_code == 403
+    assert resp_ps.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_outbound_web_client_renders_200_for_all_outbound_roles() -> None:
+    """Xác nhận /outbound render 200 cho thukho, nv_soan, nv_dongoi với cookie abest_session."""
+    from client.app.core.api_client import ApiClient
+    from client.app.main import app as client_app
+
+    orig = ApiClient.backend_app
+    ApiClient.backend_app = app
+    try:
+        web = TestClient(client_app)
+        for u in ("thukho", "nv_soan", "nv_dongoi"):
+            r = web.get("/outbound", cookies={"abest_session": _login(u)}, follow_redirects=False)
+            assert r.status_code == 200
+            assert "Phân hệ Xuất kho" in r.text
+    finally:
+        ApiClient.backend_app = orig
+
+
+def test_outbound_c08_picking_and_packing_views_and_rbac() -> None:
+    """Xác nhận giao diện C-08 /outbound/picking, /outbound/packing và route báo ngoại lệ."""
+    from client.app.core.api_client import ApiClient
+    from client.app.main import app as client_app
+
+    orig = ApiClient.backend_app
+    ApiClient.backend_app = app
+    try:
+        web = TestClient(client_app)
+
+        soan = _login("nv_soan")
+        r_pick = web.get(
+            "/outbound/picking", cookies={"abest_session": soan}, follow_redirects=False
+        )
+        assert r_pick.status_code == 200
+        assert "Khu vực Soạn hàng" in r_pick.text
+        assert (
+            web.get(
+                "/outbound/packing", cookies={"abest_session": soan}, follow_redirects=False
+            ).status_code
+            == 403
+        )
+
+        r_exc = web.post(
+            f"/outbound/pick-sessions/{uuid.uuid4()}/lines/{uuid.uuid4()}/exception",
+            data={
+                "exception_type": "EXCEPTION_SHORT",
+                "exception_reason": "SHORTAGE",
+                "qty_actual": "0",
+            },
+            headers={"HX-Request": "true"},
+            cookies={"abest_session": soan},
+        )
+        assert r_exc.status_code == 200
+        assert "NOT_FOUND" in r_exc.text
+
+        dongoi = _login("nv_dongoi")
+        r_pack = web.get(
+            "/outbound/packing", cookies={"abest_session": dongoi}, follow_redirects=False
+        )
+        assert r_pack.status_code == 200
+        assert "Khu vực Đóng gói" in r_pack.text
+        assert (
+            web.get(
+                "/outbound/picking", cookies={"abest_session": dongoi}, follow_redirects=False
+            ).status_code
+            == 403
+        )
+    finally:
+        ApiClient.backend_app = orig

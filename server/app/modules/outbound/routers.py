@@ -32,11 +32,12 @@ def get_outbound_orders(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("QL-2.1")),
+    access_type: str = Depends(require_permission("QL-2.1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     items, total = OutboundService.list_orders(
         db=db,
+        access_type=access_type,
         user_ctx=user_ctx,
         status=status_filter,
         page=page,
@@ -49,7 +50,7 @@ def get_outbound_orders(
 def get_outbound_order_by_id(
     order_id: uuid.UUID,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("QL-2.1")),
+    access_type: str = Depends(require_permission("QL-2.1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     data = OutboundService.get_order_detail(db=db, user_ctx=user_ctx, order_id=order_id)
@@ -61,12 +62,13 @@ def allocate_outbound_order(
     order_id: uuid.UUID,
     req: AllocateOrderRequest | None = None,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("QL-2.1")),
+    access_type: str = Depends(require_permission("SO-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     payload = req or AllocateOrderRequest()
     data = OutboundService.allocate_order(
         db=db,
+        access_type=access_type,
         user_ctx=user_ctx,
         order_id=order_id,
         req=payload,
@@ -82,10 +84,12 @@ def allocate_outbound_order(
 def create_pick_session(
     req: CreatePickSessionRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("SO-1")),
+    access_type: str = Depends(require_permission("SO-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    data = OutboundService.create_pick_session(db=db, user_ctx=user_ctx, req=req)
+    data = OutboundService.create_pick_session(
+        db=db, user_ctx=user_ctx, req=req, access_type=access_type
+    )
     return success_response(data=data)
 
 
@@ -93,11 +97,12 @@ def create_pick_session(
 def get_pick_session_by_id(
     pick_session_id: uuid.UUID,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("SO-1")),
+    access_type: str = Depends(require_permission("SO-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     data = OutboundService.get_pick_session_detail(
         db=db,
+        access_type=access_type,
         user_ctx=user_ctx,
         pick_session_id=pick_session_id,
     )
@@ -113,11 +118,12 @@ def confirm_pick_line(
     pick_line_id: uuid.UUID,
     req: ConfirmPickLineRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("SO-1")),
+    access_type: str = Depends(require_permission("SO-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     data = OutboundService.confirm_pick_line(
         db=db,
+        access_type=access_type,
         user_ctx=user_ctx,
         pick_session_id=pick_session_id,
         pick_line_id=pick_line_id,
@@ -135,11 +141,12 @@ def report_pick_line_exception(
     pick_line_id: uuid.UUID,
     req: PickLineExceptionRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("SO-1")),
+    access_type: str = Depends(require_permission("SO-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     data = OutboundService.report_pick_line_exception(
         db=db,
+        access_type=access_type,
         user_ctx=user_ctx,
         pick_session_id=pick_session_id,
         pick_line_id=pick_line_id,
@@ -157,11 +164,12 @@ def create_package(
     order_id: uuid.UUID,
     req: CreatePackageRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("DG-1")),
+    access_type: str = Depends(require_permission("DG-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     data = OutboundService.create_package(
         db=db,
+        access_type=access_type,
         user_ctx=user_ctx,
         order_id=order_id,
         req=req,
@@ -177,10 +185,12 @@ def create_package(
 def create_goods_issue(
     req: CreateGoodsIssueRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("DG-1")),
+    access_type: str = Depends(require_permission("DG-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    data = OutboundService.create_goods_issue(db=db, user_ctx=user_ctx, req=req)
+    data = OutboundService.create_goods_issue(
+        db=db, user_ctx=user_ctx, req=req, access_type=access_type
+    )
     return success_response(data=data)
 
 
@@ -192,11 +202,12 @@ def confirm_goods_issue(
     gi_id: uuid.UUID,
     req: ConfirmGoodsIssueRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("DG-1")),
+    access_type: str = Depends(require_permission("DG-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     data = OutboundService.confirm_goods_issue(
         db=db,
+        access_type=access_type,
         user_ctx=user_ctx,
         gi_id=gi_id,
         req=req,
@@ -212,11 +223,12 @@ def decide_order_change(
     request_id: uuid.UUID,
     req: DecideOrderChangeRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("QL-5.3")),
+    access_type: str = Depends(require_permission("QL-5.3")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     data = OutboundService.decide_order_change(
         db=db,
+        access_type=access_type,
         user_ctx=user_ctx,
         request_id=request_id,
         req=req,

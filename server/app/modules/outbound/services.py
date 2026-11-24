@@ -31,6 +31,17 @@ from server.app.modules.outbound.schemas import (
     DecideOrderChangeRequest,
     PickLineExceptionRequest,
 )
+from server.app.modules.tasks import (
+    AcceptTaskRequest,
+    AssignTaskRequest,
+    CompleteTaskRequest,
+    CreateTaskRequest,
+    accept_task,
+    assign_task,
+    complete_task,
+    create_task,
+    get_latest_task_by_ref_doc,
+)
 
 
 def _translate_outbound_db_error(exc: Exception) -> BusinessError:
@@ -48,7 +59,7 @@ def _translate_outbound_db_error(exc: Exception) -> BusinessError:
         return BusinessError(
             code="OUTBOUND_REJECT_NOTE_REQUIRED",
             message="Từ chối yêu cầu đổi/hủy của ERP bắt buộc ghi lý do",
-            http_status=400,
+            http_status=422,
         )
     if "DON_DA_LEN_XE" in err:
         return BusinessError(
@@ -77,6 +88,15 @@ def _translate_outbound_db_error(exc: Exception) -> BusinessError:
     return translate_db_error(exc)
 
 
+def _require_access(access_type: str | None, allowed: tuple[str, ...]) -> None:
+    if access_type is not None and access_type not in allowed:
+        raise BusinessError(
+            code="FORBIDDEN",
+            message=f"Mức quyền '{access_type}' không được phép thao tác",
+            http_status=403,
+        )
+
+
 class OutboundService:
     """Service điều phối quy trình xuất kho, cấp phát, soạn hàng, đóng gói và phát hành GI."""
 
@@ -87,6 +107,7 @@ class OutboundService:
         status: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        access_type: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         return OutboundRepository.list_orders(
             db=db,
@@ -101,6 +122,7 @@ class OutboundService:
         db: Session,
         user_ctx: UserContext,
         order_id: uuid.UUID,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
         order = OutboundRepository.get_order_raw(db, order_id, for_update=True)
         if not order:
@@ -193,7 +215,9 @@ class OutboundService:
         user_ctx: UserContext,
         order_id: uuid.UUID,
         req: AllocateOrderRequest,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
+        _require_access(access_type, ("G",))
         order = OutboundRepository.get_order_raw(db, order_id, for_update=True)
         if not order:
             raise BusinessError(
@@ -372,7 +396,9 @@ class OutboundService:
         db: Session,
         user_ctx: UserContext,
         req: CreatePickSessionRequest,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
+        _require_access(access_type, ("G",))
         if user_ctx.role_code != "thukho":
             raise BusinessError(
                 code="FORBIDDEN",
@@ -394,7 +420,7 @@ class OutboundService:
             raise BusinessError(
                 code="OUTBOUND_INVALID_PICKER",
                 message="Nhân viên soạn hàng không hợp lệ hoặc không thuộc vai trò nv-soan",
-                http_status=400,
+                http_status=422,
             )
         orders_to_pick: list[dict[str, Any]] = []
 
@@ -495,13 +521,28 @@ class OutboundService:
                 )
 
             has_urgent = any(bool(item["order"].get("is_urgent")) for item in orders_to_pick)
-            OutboundRepository.create_picking_task(
+            t = create_task(
                 db=db,
                 warehouse_id=user_ctx.warehouse_id,
-                pick_session_id=pick_session_id,
-                assigned_to=picker_id,
-                priority_score=90 if has_urgent else 50,
+                creator_id=user_ctx.user_id,
+                req=CreateTaskRequest(
+                    task_type="PICKING",
+                    stage="SOAN_HANG",
+                    ref_doc_type="PICK_SESSION",
+                    ref_doc_id=pick_session_id,
+                    priority="HIGH" if has_urgent else "NORMAL",
+                ),
             )
+            if req.picker_user_id:
+                assign_task(
+                    db=db,
+                    task_id=t.task_id,
+                    assigner_id=user_ctx.user_id,
+                    req=AssignTaskRequest(
+                        assigned_to_user_id=req.picker_user_id, version_no=t.version_no
+                    ),
+                    warehouse_id=user_ctx.warehouse_id,
+                )
             create_audit_log(
                 db=db,
                 action_code="CREATE_PICK_SESSION",
@@ -534,6 +575,7 @@ class OutboundService:
         db: Session,
         user_ctx: UserContext,
         pick_session_id: uuid.UUID,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
         ps = OutboundRepository.get_pick_session_raw(db, pick_session_id)
         if not ps:
@@ -594,7 +636,9 @@ class OutboundService:
         pick_session_id: uuid.UUID,
         pick_line_id: uuid.UUID,
         req: ConfirmPickLineRequest,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
+        _require_access(access_type, ("X", "X_OWN"))
         ps = OutboundRepository.get_pick_session_raw(db, pick_session_id, for_update=True)
         if not ps:
             raise BusinessError(
@@ -650,6 +694,15 @@ class OutboundService:
                 message="Số lượng thực lấy vượt quá số lượng cần soạn",
                 http_status=409,
             )
+        if req.qty_picked < qty_to_pick:
+            raise BusinessError(
+                code="OUTBOUND_PARTIAL_PICK_REQUIRES_EXCEPTION",
+                message=(
+                    "Số lượng thực lấy nhỏ hơn số lượng cần soạn; "
+                    "vui lòng báo ngoại lệ qua /exception"
+                ),
+                http_status=409,
+            )
 
         warehouse_id = uuid.UUID(str(line["warehouse_id"]))
         source_location_id = uuid.UUID(str(line["source_location_id"]))
@@ -660,6 +713,8 @@ class OutboundService:
         actual_lot_id = req.actual_lot_id or (
             uuid.UUID(str(line["suggested_lot_id"])) if line["suggested_lot_id"] else None
         )
+        actual_pallet_id = uuid.UUID(str(line["pallet_id"])) if line.get("pallet_id") else None
+        actual_serial_number = line.get("serial_number")
 
         try:
             suggested_lot = (
@@ -682,12 +737,16 @@ class OutboundService:
                 apply_movement(
                     db=db,
                     warehouse_id=uuid.UUID(str(line["warehouse_id"])),
-                    location_id=uuid.UUID(str(line["location_id"])),
+                    location_id=uuid.UUID(str(line["source_location_id"])),
                     sku_id=uuid.UUID(str(line["sku_id"])),
-                    lot_id=uuid.UUID(str(line["lot_id"])) if line.get("lot_id") else None,
-                    pallet_id=None,
-                    serial_number=None,
-                    tx_type="UNALLOCATE",
+                    lot_id=(
+                        uuid.UUID(str(line["suggested_lot_id"]))
+                        if line.get("suggested_lot_id")
+                        else None
+                    ),
+                    pallet_id=uuid.UUID(str(line["pallet_id"])) if line.get("pallet_id") else None,
+                    serial_number=line.get("serial_number"),
+                    tx_type="DEALLOCATE",
                     delta_available=req.qty_picked,
                     delta_allocated=-req.qty_picked,
                     ref_doc_type="PICK_SESSION",
@@ -697,11 +756,13 @@ class OutboundService:
                 apply_movement(
                     db=db,
                     warehouse_id=uuid.UUID(str(line["warehouse_id"])),
-                    location_id=uuid.UUID(str(line["location_id"])),
+                    location_id=source_location_id,
                     sku_id=uuid.UUID(str(line["sku_id"])),
                     lot_id=req.actual_lot_id,
-                    pallet_id=None,
-                    serial_number=None,
+                    pallet_id=(
+                        uuid.UUID(str(alt_bal["pallet_id"])) if alt_bal.get("pallet_id") else None
+                    ),
+                    serial_number=alt_bal.get("serial_number"),
                     tx_type="ALLOCATE",
                     delta_available=-req.qty_picked,
                     delta_allocated=req.qty_picked,
@@ -709,6 +770,10 @@ class OutboundService:
                     ref_doc_id=pick_session_id,
                     performed_by=user_ctx.user_id,
                 )
+                actual_pallet_id = (
+                    uuid.UUID(str(alt_bal["pallet_id"])) if alt_bal.get("pallet_id") else None
+                )
+                actual_serial_number = alt_bal.get("serial_number")
                 OutboundRepository.swap_allocation_balance(
                     db,
                     uuid.UUID(str(line["allocation_id"])),
@@ -724,8 +789,8 @@ class OutboundService:
                     to_location_id=staged_location_id,
                     sku_id=uuid.UUID(str(line["sku_id"])),
                     lot_id=actual_lot_id,
-                    pallet_id=uuid.UUID(str(line["pallet_id"])) if line["pallet_id"] else None,
-                    serial_number=line["serial_number"],
+                    pallet_id=actual_pallet_id,
+                    serial_number=actual_serial_number,
                     qty=req.qty_picked,
                     tx_type="PICK_TO_STAGING",
                     ref_doc_type="PICK_SESSION",
@@ -752,6 +817,26 @@ class OutboundService:
                 db=db,
                 pick_session_id=pick_session_id,
             )
+            lt = get_latest_task_by_ref_doc(db, "PICK_SESSION", pick_session_id)
+            if lt and lt.assigned_to == user_ctx.user_id:
+                tid, tver = lt.task_id, lt.version_no
+                if lt.status == "ASSIGNED":
+                    acc_res = accept_task(
+                        db=db,
+                        task_id=tid,
+                        worker_id=user_ctx.user_id,
+                        req=AcceptTaskRequest(version_no=tver),
+                        warehouse_id=warehouse_id,
+                    )
+                    tver = acc_res.version_no
+                if ps_updated["status"] == "COMPLETED" and lt.status != "COMPLETED":
+                    complete_task(
+                        db=db,
+                        task_id=tid,
+                        worker_id=user_ctx.user_id,
+                        req=CompleteTaskRequest(version_no=tver),
+                        warehouse_id=warehouse_id,
+                    )
 
             create_audit_log(
                 db=db,
@@ -786,7 +871,9 @@ class OutboundService:
         pick_session_id: uuid.UUID,
         pick_line_id: uuid.UUID,
         req: PickLineExceptionRequest,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
+        _require_access(access_type, ("X", "X_OWN"))
         ps = OutboundRepository.get_pick_session_raw(db, pick_session_id, for_update=True)
         if not ps:
             raise BusinessError(
@@ -818,26 +905,30 @@ class OutboundService:
                     f"Mã lý do ngoại lệ '{req.exception_reason}' "
                     "không tồn tại hoặc đã ngưng hoạt động"
                 ),
-                http_status=400,
+                http_status=422,
             )
 
         allowed_types = {"EXCEPTION_SHORT", "EXCEPTION_DAMAGED", "EXCEPTION_WRONG_LOT"}
         exc_type = req.exception_type if req.exception_type in allowed_types else "EXCEPTION_SHORT"
 
         try:
-            qty_short = Decimal(str(line["qty_to_pick"])) - req.qty_actual
-            if qty_short > Decimal("0") and line.get("balance_id"):
+            qty_to_release = Decimal(str(line["qty_to_pick"]))
+            if qty_to_release > Decimal("0"):
                 apply_movement(
                     db=db,
                     warehouse_id=uuid.UUID(str(line["warehouse_id"])),
-                    location_id=uuid.UUID(str(line["location_id"])),
+                    location_id=uuid.UUID(str(line["source_location_id"])),
                     sku_id=uuid.UUID(str(line["sku_id"])),
-                    lot_id=uuid.UUID(str(line["lot_id"])) if line.get("lot_id") else None,
-                    pallet_id=None,
-                    serial_number=None,
-                    tx_type="UNALLOCATE",
-                    delta_available=qty_short,
-                    delta_allocated=-qty_short,
+                    lot_id=(
+                        uuid.UUID(str(line["suggested_lot_id"]))
+                        if line.get("suggested_lot_id")
+                        else None
+                    ),
+                    pallet_id=uuid.UUID(str(line["pallet_id"])) if line.get("pallet_id") else None,
+                    serial_number=line.get("serial_number"),
+                    tx_type="DEALLOCATE",
+                    delta_available=qty_to_release,
+                    delta_allocated=-qty_to_release,
                     ref_doc_type="PICK_SESSION",
                     ref_doc_id=pick_session_id,
                     performed_by=user_ctx.user_id,
@@ -883,7 +974,9 @@ class OutboundService:
         user_ctx: UserContext,
         order_id: uuid.UUID,
         req: CreatePackageRequest,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
+        _require_access(access_type, ("X",))
         order = OutboundRepository.get_order_raw(db, order_id, for_update=True)
         if not order:
             raise BusinessError(
@@ -1013,8 +1106,10 @@ class OutboundService:
         db: Session,
         user_ctx: UserContext,
         req: CreateGoodsIssueRequest,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
-        order = OutboundRepository.get_order_raw(db, req.order_id)
+        _require_access(access_type, ("X",))
+        order = OutboundRepository.get_order_raw(db, req.order_id, for_update=True)
         if not order:
             raise BusinessError(
                 code="NOT_FOUND",
@@ -1102,8 +1197,10 @@ class OutboundService:
         user_ctx: UserContext,
         gi_id: uuid.UUID,
         req: ConfirmGoodsIssueRequest,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
-        gi = OutboundRepository.get_goods_issue_raw(db, gi_id)
+        _require_access(access_type, ("X",))
+        gi = OutboundRepository.get_goods_issue_raw(db, gi_id, for_update=True)
         if not gi:
             raise BusinessError(
                 code="NOT_FOUND",
@@ -1211,7 +1308,9 @@ class OutboundService:
         user_ctx: UserContext,
         request_id: uuid.UUID,
         req: DecideOrderChangeRequest,
+        access_type: str | None = None,
     ) -> dict[str, Any]:
+        _require_access(access_type, ("X",))
         if user_ctx.role_code not in ("quanly", "bgd"):
             raise BusinessError(
                 code="FORBIDDEN",
