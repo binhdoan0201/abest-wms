@@ -138,6 +138,8 @@ class SkuCreate(_StrictModel):
     is_expiry_tracked: bool = True
     is_serial_tracked: bool = False
     storage_requirement: StorageRequirementLiteral = "NORMAL"
+    unit_weight_kg: Decimal | None = Field(None, ge=0, max_digits=12, decimal_places=4)
+    unit_volume_m3: Decimal | None = Field(None, ge=0, max_digits=12, decimal_places=6)
 
 
 class SkuUpdate(_StrictModel):
@@ -152,6 +154,8 @@ class SkuUpdate(_StrictModel):
     is_expiry_tracked: bool | None = None
     is_serial_tracked: bool | None = None
     storage_requirement: StorageRequirementLiteral | None = None
+    unit_weight_kg: Decimal | None = Field(None, ge=0, max_digits=12, decimal_places=4)
+    unit_volume_m3: Decimal | None = Field(None, ge=0, max_digits=12, decimal_places=6)
 
 
 # --------------------------------------------------------------------------- sku-barcodes
