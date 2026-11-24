@@ -93,7 +93,10 @@ def outbound_allocate_htmx(
     api_error: dict[str, str] | None = None
 
     try:
-        api.post(f"/outbound-orders/{order_id}/allocate", json_data={"strategy": strategy, "version_no": version_no})
+        api.post(
+            f"/outbound-orders/{order_id}/allocate",
+            json_data={"strategy": strategy, "version_no": version_no},
+        )
         flash_msg = "Đã cấp phát tồn kho thành công!"
     except ClientApiError as exc:
         api_error = {"code": exc.code, "message": exc.message}

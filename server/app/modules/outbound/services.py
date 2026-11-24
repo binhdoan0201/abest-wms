@@ -388,8 +388,14 @@ class OutboundService:
             )
 
         picker_id = req.picker_user_id or user_ctx.user_id
-        if req.picker_user_id and not OutboundRepository.validate_picker_user(db, req.picker_user_id, user_ctx.warehouse_id):
-            raise BusinessError(code="OUTBOUND_INVALID_PICKER", message="Nhân viên soạn hàng không hợp lệ hoặc không thuộc vai trò nv-soan tại kho này", http_status=400)
+        if req.picker_user_id and not OutboundRepository.validate_picker_user(
+            db, req.picker_user_id, user_ctx.warehouse_id
+        ):
+            raise BusinessError(
+                code="OUTBOUND_INVALID_PICKER",
+                message="Nhân viên soạn hàng không hợp lệ hoặc không thuộc vai trò nv-soan",
+                http_status=400,
+            )
         orders_to_pick: list[dict[str, Any]] = []
 
         for oid in req.order_ids:
@@ -489,9 +495,12 @@ class OutboundService:
                 )
 
             has_urgent = any(bool(item["order"].get("is_urgent")) for item in orders_to_pick)
-            task_id = OutboundRepository.create_picking_task(
-                db=db, warehouse_id=user_ctx.warehouse_id, pick_session_id=pick_session_id,
-                assigned_to=picker_id, priority_score=90 if has_urgent else 50,
+            OutboundRepository.create_picking_task(
+                db=db,
+                warehouse_id=user_ctx.warehouse_id,
+                pick_session_id=pick_session_id,
+                assigned_to=picker_id,
+                priority_score=90 if has_urgent else 50,
             )
             create_audit_log(
                 db=db,
@@ -653,16 +662,59 @@ class OutboundService:
         )
 
         try:
-            suggested_lot = uuid.UUID(str(line["suggested_lot_id"])) if line["suggested_lot_id"] else None
+            suggested_lot = (
+                uuid.UUID(str(line["suggested_lot_id"])) if line["suggested_lot_id"] else None
+            )
             if req.actual_lot_id and req.actual_lot_id != suggested_lot and line["allocation_id"]:
                 alt_bal = OutboundRepository.find_lot_balance_at_location(
-                    db, source_location_id, uuid.UUID(str(line["sku_id"])), req.actual_lot_id, req.qty_picked
+                    db,
+                    source_location_id,
+                    uuid.UUID(str(line["sku_id"])),
+                    req.actual_lot_id,
+                    req.qty_picked,
                 )
                 if not alt_bal:
-                    raise BusinessError(code="OUTBOUND_INVALID_ACTUAL_LOT", message="Lô thực tế không đủ tồn khả dụng tại vị trí kệ đang lấy", http_status=409)
-                reserve_inventory(db=db, balance_id=uuid.UUID(str(line["balance_id"])), delta_available=req.qty_picked, delta_allocated=-req.qty_picked, ref_doc_type="PICK_SESSION", ref_doc_id=pick_session_id, performed_by=user_ctx.user_id)
-                reserve_inventory(db=db, balance_id=uuid.UUID(str(alt_bal["balance_id"])), delta_available=-req.qty_picked, delta_allocated=req.qty_picked, ref_doc_type="PICK_SESSION", ref_doc_id=pick_session_id, performed_by=user_ctx.user_id)
-                OutboundRepository.swap_allocation_balance(db, uuid.UUID(str(line["allocation_id"])), uuid.UUID(str(alt_bal["balance_id"])), req.actual_lot_id)
+                    raise BusinessError(
+                        code="OUTBOUND_INVALID_ACTUAL_LOT",
+                        message="Lô thực tế không đủ tồn khả dụng tại vị trí kệ đang lấy",
+                        http_status=409,
+                    )
+                apply_movement(
+                    db=db,
+                    warehouse_id=uuid.UUID(str(line["warehouse_id"])),
+                    location_id=uuid.UUID(str(line["location_id"])),
+                    sku_id=uuid.UUID(str(line["sku_id"])),
+                    lot_id=uuid.UUID(str(line["lot_id"])) if line.get("lot_id") else None,
+                    pallet_id=None,
+                    serial_number=None,
+                    tx_type="UNALLOCATE",
+                    delta_available=req.qty_picked,
+                    delta_allocated=-req.qty_picked,
+                    ref_doc_type="PICK_SESSION",
+                    ref_doc_id=pick_session_id,
+                    performed_by=user_ctx.user_id,
+                )
+                apply_movement(
+                    db=db,
+                    warehouse_id=uuid.UUID(str(line["warehouse_id"])),
+                    location_id=uuid.UUID(str(line["location_id"])),
+                    sku_id=uuid.UUID(str(line["sku_id"])),
+                    lot_id=req.actual_lot_id,
+                    pallet_id=None,
+                    serial_number=None,
+                    tx_type="ALLOCATE",
+                    delta_available=-req.qty_picked,
+                    delta_allocated=req.qty_picked,
+                    ref_doc_type="PICK_SESSION",
+                    ref_doc_id=pick_session_id,
+                    performed_by=user_ctx.user_id,
+                )
+                OutboundRepository.swap_allocation_balance(
+                    db,
+                    uuid.UUID(str(line["allocation_id"])),
+                    uuid.UUID(str(alt_bal["balance_id"])),
+                    req.actual_lot_id,
+                )
             # Chuyển hàng ALLOCATED từ vị trí kệ sang vị trí STAGING (nếu khác vị trí)
             if staged_location_id and staged_location_id != source_location_id:
                 transfer_inventory(
@@ -775,7 +827,21 @@ class OutboundService:
         try:
             qty_short = Decimal(str(line["qty_to_pick"])) - req.qty_actual
             if qty_short > Decimal("0") and line.get("balance_id"):
-                reserve_inventory(db=db, balance_id=uuid.UUID(str(line["balance_id"])), delta_available=qty_short, delta_allocated=-qty_short, ref_doc_type="PICK_SESSION", ref_doc_id=pick_session_id, performed_by=user_ctx.user_id)
+                apply_movement(
+                    db=db,
+                    warehouse_id=uuid.UUID(str(line["warehouse_id"])),
+                    location_id=uuid.UUID(str(line["location_id"])),
+                    sku_id=uuid.UUID(str(line["sku_id"])),
+                    lot_id=uuid.UUID(str(line["lot_id"])) if line.get("lot_id") else None,
+                    pallet_id=None,
+                    serial_number=None,
+                    tx_type="UNALLOCATE",
+                    delta_available=qty_short,
+                    delta_allocated=-qty_short,
+                    ref_doc_type="PICK_SESSION",
+                    ref_doc_id=pick_session_id,
+                    performed_by=user_ctx.user_id,
+                )
             OutboundRepository.record_pick_line_exception_db(
                 db=db,
                 pick_line_id=pick_line_id,
