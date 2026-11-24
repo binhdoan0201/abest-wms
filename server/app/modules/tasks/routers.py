@@ -131,6 +131,9 @@ def assign_task_endpoint(
             code="FORBIDDEN", message="Không có quyền giao nhiệm vụ", http_status=403
         )
 
+    if not user_ctx.warehouse_id:
+        raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
+
     task = TaskService.assign_task(
         db=db,
         task_id=task_id,
@@ -149,6 +152,9 @@ def accept_task_endpoint(
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Nhân viên nhận nhiệm vụ được giao."""
+    if not user_ctx.warehouse_id:
+        raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
+
     task = TaskService.accept_task(
         db=db,
         task_id=task_id,
@@ -167,6 +173,9 @@ def reject_task_endpoint(
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Nhân viên từ chối nhiệm vụ kèm lý do."""
+    if not user_ctx.warehouse_id:
+        raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
+
     task = TaskService.reject_task(
         db=db,
         task_id=task_id,
@@ -185,6 +194,9 @@ def complete_task_endpoint(
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Nhân viên hoàn tất nhiệm vụ."""
+    if not user_ctx.warehouse_id:
+        raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
+
     task = TaskService.complete_task(
         db=db,
         task_id=task_id,
@@ -208,6 +220,9 @@ def reassign_task_endpoint(
             code="FORBIDDEN", message="Không có quyền điều chuyển nhiệm vụ", http_status=403
         )
 
+    if not user_ctx.warehouse_id:
+        raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
+
     task = TaskService.reassign_task(
         db=db,
         task_id=task_id,
@@ -230,6 +245,9 @@ def cancel_task_endpoint(
         raise BusinessError(
             code="FORBIDDEN", message="Không có quyền hủy nhiệm vụ", http_status=403
         )
+
+    if not user_ctx.warehouse_id:
+        raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
 
     task = TaskService.cancel_task(
         db=db,

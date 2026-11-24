@@ -1,8 +1,8 @@
 """ABEST WMS - Kiểm thử Phân hệ Nhiệm vụ (Tasks): assign, reassign, cancel (D-01, D-02).
 
 Gồm hai nhóm:
-- Kiểm thử service (có rollback sau mỗi bài, không để lại dữ liệu): giao, điu chuyển, hủy,
-  khóa lạc quan `version_no`, giới hạn task mở (gồm PAUSED_OFFLINE), phạm vi kho, điu kiện nhân
+- Kiểm thử service (có rollback sau mỗi bài, không để lại dữ liệu): giao, điều chuyển, hủy,
+  khóa lạc quan `version_no`, giới hạn task mở (gồm PAUSED_OFFLINE), phạm vi kho, điều kiện nhân
   viên,
   tính `sla_due_at` và audit log (`TASK_REJECT`, `TASK_REASSIGN`, `TASK_CANCEL`).
 - Kiểm thử endpoint: mỗi endpoint thử 1 vai trò đúng và 1 vai trò sai.
@@ -205,7 +205,7 @@ def test_assign_inactive_or_unsafe_seasonal_user_rejected(db_session: Session) -
     assert exc_inactive.value.code == "INVALID_STATE"
     assert exc_inactive.value.http_status == 409
 
-    # 2. Khôi phục ACTIVE nhưng đặt thi vụ chưa kiểm tra an toàn
+    # 2. Khôi phục ACTIVE nhưng đặt thời vụ chưa kiểm tra an toàn
     db_session.execute(
         text(
             "UPDATE users SET status = 'ACTIVE', is_seasonal = TRUE, valid_until = NOW() + "
@@ -228,7 +228,7 @@ def test_assign_exceeds_max_open_tasks_including_paused_offline(db_session: Sess
         assigned_list.append(
             _assign(db_session, _new_task(db_session, "KIEM_KE", "CYCLE_COUNT"), "nv_kiemke")
         )
-    # ưa 1 task sang PAUSED_OFFLINE: vẫn phải tính là task mở
+    # Đưa 1 task sang PAUSED_OFFLINE: vẫn phải tính là task mở
     db_session.execute(
         text("UPDATE tasks SET status = 'PAUSED_OFFLINE' WHERE task_id = :t"),
         {"t": assigned_list[0].task_id},
@@ -264,7 +264,7 @@ def test_reassign_resets_started_at_and_logs_reason(db_session: Session) -> None
         task_id=task.task_id,
         assigner_id=thukho_id,
         req=ReassignTaskRequest(
-            new_assigned_to_user_id=quanly_id, reason="ổi ca", version_no=started.version_no
+            new_assigned_to_user_id=quanly_id, reason="Đổi ca", version_no=started.version_no
         ),
         warehouse_id=task.warehouse_id,
     )
@@ -272,7 +272,7 @@ def test_reassign_resets_started_at_and_logs_reason(db_session: Session) -> None
     assert moved.assigned_to == quanly_id
     assert moved.started_at is None
     assert moved.version_no == started.version_no + 1
-    assert _audit_reason(db_session, task.task_id, "TASK_REASSIGN") == "ổi ca"
+    assert _audit_reason(db_session, task.task_id, "TASK_REASSIGN") == "Đổi ca"
 
 
 def test_reassign_to_same_user_is_rejected(db_session: Session) -> None:
@@ -284,7 +284,7 @@ def test_reassign_to_same_user_is_rejected(db_session: Session) -> None:
             assigner_id=_user_id(db_session, "thukho"),
             req=ReassignTaskRequest(
                 new_assigned_to_user_id=_user_id(db_session, "nv_cat"),
-                reason="Trùng ngưi",
+                reason="Trùng người",
                 version_no=task.version_no,
             ),
             warehouse_id=task.warehouse_id,
@@ -426,7 +426,7 @@ def test_cancel_wrong_version_conflict(db_session: Session) -> None:
 
 def _login(username: str) -> tuple[dict[str, str], str]:
     res = client.post("/api/v1/auth/login", json={"username": username, "password": PASSWORD})
-    assert res.status_code == 200, f"ăng nhập thất bại cho {username}"
+    assert res.status_code == 200, f"Đăng nhập thất bại cho {username}"
     data = res.json()["data"]
     return {"Authorization": f"Bearer {data['access_token']}"}, str(data["user"]["user_id"])
 
@@ -492,7 +492,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
             client.post(
                 f"{BASE}/{task_id}/reject",
                 headers=nv_nhan,
-                json={"rejection_reason": "Sai ngưi", "version_no": version},
+                json={"rejection_reason": "Sai người", "version_no": version},
             ).status_code
             == 403
         )
@@ -522,7 +522,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
         assert res_acc.status_code == 200
         version = res_acc.json()["data"]["version_no"]
 
-        # Vai trò sai (nv_nhan) gi complete -> 403; vai trò đúng (nv_cat) -> 200
+        # Vai trò sai (nv_nhan) gọi complete -> 403; vai trò đúng (nv_cat) -> 200
         assert (
             client.post(
                 f"{BASE}/{task_id}/complete", headers=nv_nhan, json={"version_no": version}
@@ -534,7 +534,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
         )
         assert res_done.status_code == 200
     finally:
-        # Tạo 1 task phụ để test reassign + cancel và dn sạch
+        # Tạo 1 task phụ để test reassign + cancel và dọn sạch
         extra = client.post(
             BASE,
             headers=thukho,
@@ -564,7 +564,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
         r3 = client.post(
             f"{BASE}/{ex_id}/cancel",
             headers=thukho,
-            json={"cancel_reason": "Dn dữ liệu kiểm thử", "version_no": r2["version_no"]},
+            json={"cancel_reason": "Dọn dữ liệu kiểm thử", "version_no": r2["version_no"]},
         )
         assert r3.status_code == 200
 
@@ -581,7 +581,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
     ],
 )
 def test_endpoints_forbidden_for_worker_role(action: str, body: dict[str, Any]) -> None:
-    """nv_nhan (nhân viên thực thi) gi endpoint của quản lý phải bị 403."""
+    """nv_nhan (nhân viên thực thi) gọi endpoint của quản lý phải bị 403."""
     headers, _ = _login("nv_nhan")
     res = client.post(f"{BASE}/{uuid.uuid4()}/{action}", headers=headers, json=body)
     assert res.status_code == 403

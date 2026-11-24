@@ -2,9 +2,9 @@
 
 Triển khai đầy đủ các nghiệp vụ D-01, D-02:
 - create_task (tự tính `sla_due_at` theo cấu hình `warehouse_configs.task_sla_minutes`)
-- assign_task (kiểm tra phạm vi kho, điu kiện nhân viên, khâu làm việc và giới hạn task mở)
+- assign_task (kiểm tra phạm vi kho, điều kiện nhân viên, khâu làm việc và giới hạn task mở)
 - accept_task / reject_task / complete_task
-- reassign_task (điu chuyển task sang nhân viên khác, reset `started_at`)
+- reassign_task (điều chuyển task sang nhân viên khác, reset `started_at`)
 - cancel_task (hủy task chưa hoàn tất)
 """
 
@@ -58,18 +58,18 @@ def _task_to_schema(t: Task) -> TaskResponse:
 def _get_task_in_warehouse(
     db: Session,
     task_id: uuid.UUID,
-    warehouse_id: uuid.UUID | None,
+    warehouse_id: uuid.UUID,
     for_update: bool = True,
 ) -> Task:
-    """Lấy nhiệm vụ và xác thực thuộc đúng kho của ngưi thao tác (quy tắc 5.4.1)."""
+    """Lấy nhiệm vụ và xác thực thuộc đúng kho của người thao tác (quy tắc 5.4.1)."""
     task = TaskRepository.get_task_by_id(db, task_id, for_update=for_update)
-    if not task or not warehouse_id or task.warehouse_id != warehouse_id:
+    if not task or task.warehouse_id != warehouse_id:
         raise BusinessError(code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404)
     return task
 
 
 def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
-    """Kiểm tra ngưi nhận việc: tồn tại, cùng kho, ACTIVE, đúng vai trò/khâu, an toàn thi vụ và
+    """Kiểm tra người nhận việc: tồn tại, cùng kho, ACTIVE, đúng vai trò/khâu, an toàn thời vụ và
     giới hạn task mở."""
     user_info = TaskRepository.lock_user_for_assignment(db, user_id)
     if user_info is None:
@@ -99,7 +99,7 @@ def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
     if not is_executor and not is_mgmt_general:
         raise BusinessError(
             code="FORBIDDEN",
-            message="Ngưi được giao không có vai trò nhân viên thực thi hợp lệ",
+            message="Người được giao không có vai trò nhân viên thực thi hợp lệ",
             http_status=403,
         )
 
@@ -107,7 +107,7 @@ def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
         if not user_info["is_safety_checked"]:
             raise BusinessError(
                 code="FORBIDDEN",
-                message="Nhân viên thi vụ chưa hoàn tất kiểm tra an toàn lao động",
+                message="Nhân viên thời vụ chưa hoàn tất kiểm tra an toàn lao động",
                 http_status=403,
             )
         now = datetime.now(timezone.utc)
@@ -118,7 +118,7 @@ def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
         ):
             raise BusinessError(
                 code="FORBIDDEN",
-                message="Thi hạn làm việc của nhân viên thi vụ không hợp lệ hoặc đã hết hạn",
+                message="Thời hạn làm việc của nhân viên thời vụ không hợp lệ hoặc đã hết hạn",
                 http_status=403,
             )
 
@@ -139,7 +139,7 @@ def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
 
 
 class TaskService:
-    """Service điu phối vòng đi nhiệm vụ trong kho."""
+    """Service điều phối vòng đời nhiệm vụ trong kho."""
 
     @staticmethod
     def create_task(
@@ -191,7 +191,7 @@ class TaskService:
         task_id: uuid.UUID,
         assigner_id: uuid.UUID,
         req: AssignTaskRequest,
-        warehouse_id: uuid.UUID | None = None,
+        warehouse_id: uuid.UUID,
     ) -> TaskResponse:
         """Giao nhiệm vụ cho nhân viên (chuyển sang ASSIGNED)."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
@@ -237,7 +237,7 @@ class TaskService:
         task_id: uuid.UUID,
         worker_id: uuid.UUID,
         req: AcceptTaskRequest,
-        warehouse_id: uuid.UUID | None = None,
+        warehouse_id: uuid.UUID,
     ) -> TaskResponse:
         """Nhân viên nhận nhiệm vụ (chuyển sang IN_PROGRESS)."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
@@ -289,7 +289,7 @@ class TaskService:
         task_id: uuid.UUID,
         worker_id: uuid.UUID,
         req: RejectTaskRequest,
-        warehouse_id: uuid.UUID | None = None,
+        warehouse_id: uuid.UUID,
     ) -> TaskResponse:
         """Nhân viên từ chối nhiệm vụ kèm lý do (chuyển sang REJECTED)."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
@@ -341,7 +341,7 @@ class TaskService:
         task_id: uuid.UUID,
         worker_id: uuid.UUID,
         req: CompleteTaskRequest,
-        warehouse_id: uuid.UUID | None = None,
+        warehouse_id: uuid.UUID,
     ) -> TaskResponse:
         """Hoàn tất nhiệm vụ (chuyển sang COMPLETED, tiến độ 100%)."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
@@ -396,9 +396,9 @@ class TaskService:
         task_id: uuid.UUID,
         assigner_id: uuid.UUID,
         req: ReassignTaskRequest,
-        warehouse_id: uuid.UUID | None = None,
+        warehouse_id: uuid.UUID,
     ) -> TaskResponse:
-        """iu chuyển nhiệm vụ sang nhân viên khác."""
+        """Điều chuyển nhiệm vụ sang nhân viên khác."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
 
         if req.version_no != task.version_no:
@@ -412,7 +412,7 @@ class TaskService:
         if task.status in ("COMPLETED", "CANCELLED"):
             raise BusinessError(
                 code="INVALID_STATE",
-                message=f"Không thể điu chuyển nhiệm vụ đang ở trạng thái `{task.status}`",
+                message=f"Không thể điều chuyển nhiệm vụ đang ở trạng thái `{task.status}`",
                 http_status=409,
             )
 
@@ -456,7 +456,7 @@ class TaskService:
         task_id: uuid.UUID,
         actor_id: uuid.UUID,
         req: CancelTaskRequest,
-        warehouse_id: uuid.UUID | None = None,
+        warehouse_id: uuid.UUID,
     ) -> TaskResponse:
         """Hủy nhiệm vụ chưa hoàn tất."""
         task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
