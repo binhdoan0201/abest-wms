@@ -1299,3 +1299,23 @@ class OutboundRepository:
             ),
             {"aid": allocation_id, "nb": new_balance_id, "nl": new_lot_id},
         )
+
+    @staticmethod
+    def get_latest_picking_task(db: Session, pick_session_id: uuid.UUID) -> dict[str, Any] | None:
+        row = (
+            db.execute(
+                text(
+                    """
+                    SELECT task_id, assigned_to, status, version_no
+                    FROM tasks
+                    WHERE ref_doc_type = :rtype AND ref_doc_id = :ps_id
+                    ORDER BY created_at DESC
+                    LIMIT 1;
+                    """
+                ),
+                {"rtype": "PICK_SESSION", "ps_id": pick_session_id},
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row else None

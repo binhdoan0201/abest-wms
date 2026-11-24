@@ -8,6 +8,7 @@ Quy tắc kiến trúc:
 
 import uuid
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -32,16 +33,15 @@ from server.app.modules.outbound.schemas import (
     PickLineExceptionRequest,
 )
 from server.app.modules.tasks import (
-    AcceptTaskRequest,
-    AssignTaskRequest,
-    CompleteTaskRequest,
-    CreateTaskRequest,
     accept_task,
     assign_task,
     complete_task,
     create_task,
-    get_latest_task_by_ref_doc,
 )
+
+
+def _task_req(**kwargs: Any) -> Any:
+    return SimpleNamespace(**kwargs)
 
 
 def _translate_outbound_db_error(exc: Exception) -> BusinessError:
@@ -525,11 +525,12 @@ class OutboundService:
                 db=db,
                 warehouse_id=user_ctx.warehouse_id,
                 creator_id=user_ctx.user_id,
-                req=CreateTaskRequest(
+                req=_task_req(
                     task_type="PICKING",
                     stage="SOAN_HANG",
                     ref_doc_type="PICK_SESSION",
                     ref_doc_id=pick_session_id,
+                    zone_id=None,
                     priority="HIGH" if has_urgent else "NORMAL",
                 ),
             )
@@ -538,9 +539,7 @@ class OutboundService:
                     db=db,
                     task_id=t.task_id,
                     assigner_id=user_ctx.user_id,
-                    req=AssignTaskRequest(
-                        assigned_to_user_id=req.picker_user_id, version_no=t.version_no
-                    ),
+                    req=_task_req(assigned_to_user_id=req.picker_user_id, version_no=t.version_no),
                     warehouse_id=user_ctx.warehouse_id,
                 )
             create_audit_log(
@@ -817,24 +816,26 @@ class OutboundService:
                 db=db,
                 pick_session_id=pick_session_id,
             )
-            lt = get_latest_task_by_ref_doc(db, "PICK_SESSION", pick_session_id)
-            if lt and lt.assigned_to == user_ctx.user_id:
-                tid, tver = lt.task_id, lt.version_no
-                if lt.status == "ASSIGNED":
+            lt = OutboundRepository.get_latest_picking_task(db, pick_session_id)
+            if lt and str(lt["assigned_to"]) == str(user_ctx.user_id):
+                tid = uuid.UUID(str(lt["task_id"]))
+                tver = int(lt["version_no"])
+                tstatus = str(lt["status"])
+                if tstatus == "ASSIGNED":
                     acc_res = accept_task(
                         db=db,
                         task_id=tid,
                         worker_id=user_ctx.user_id,
-                        req=AcceptTaskRequest(version_no=tver),
+                        req=_task_req(version_no=tver),
                         warehouse_id=warehouse_id,
                     )
                     tver = acc_res.version_no
-                if ps_updated["status"] == "COMPLETED" and lt.status != "COMPLETED":
+                if ps_updated["status"] == "COMPLETED" and tstatus != "COMPLETED":
                     complete_task(
                         db=db,
                         task_id=tid,
                         worker_id=user_ctx.user_id,
-                        req=CompleteTaskRequest(version_no=tver),
+                        req=_task_req(version_no=tver, completed_qty=None),
                         warehouse_id=warehouse_id,
                     )
 
