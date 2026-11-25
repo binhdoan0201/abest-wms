@@ -255,7 +255,6 @@ def test_grn_discrepancy_approval_marks_executed_on_complete() -> None:
         sub_data = r_sub.json()["data"]
         assert sub_data["status"] == "PENDING_D1"
         approval_id = sub_data["approval_id"]
-        cur_ver = sub_data["version_no"]
 
         r_app_detail = client.get(
             f"/api/v1/approvals/{approval_id}",
@@ -275,10 +274,15 @@ def test_grn_discrepancy_approval_marks_executed_on_complete() -> None:
         assert r_approve.status_code == 200
         assert r_approve.json()["data"]["execution_status"] == "WAITING_EXECUTION"
 
+        r_grn_after = client.get(
+            f"/api/v1/grns/{grn_id}", headers={"Authorization": f"Bearer {nhan_token}"}
+        )
+        assert r_grn_after.status_code == 200
+        latest_ver = r_grn_after.json()["data"]["version_no"]
         r_comp = client.post(
             f"/api/v1/grns/{grn_id}/complete",
             headers={"Authorization": f"Bearer {nhan_token}"},
-            json={"version_no": cur_ver},
+            json={"version_no": latest_ver},
         )
         assert r_comp.status_code == 200
 
