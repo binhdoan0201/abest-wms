@@ -3,7 +3,7 @@
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from types import SimpleNamespace as CreateTaskRequest
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -14,6 +14,7 @@ from server.app.core.exceptions import BusinessError, translate_db_error
 from server.app.core.rbac import UserContext, enforce_warehouse_scope
 from server.app.modules.approvals import (
     create_approval_request,
+    mark_object_approval_executed,
     supersede_approval_for_recount,
 )
 from server.app.modules.inbound.models import (
@@ -43,7 +44,7 @@ from server.app.modules.master_data import (
     get_sku,
     get_warehouse_config,
 )
-from server.app.modules.tasks import create_task
+from server.app.modules.tasks import accept_task, assign_task, complete_task, create_task
 
 MAX_PAGE_SIZE = 100
 ASN_STATUSES = ("SCHEDULED", "ARRIVED", "RECEIVING", "COMPLETED", "CANCELLED")
@@ -60,6 +61,10 @@ GRN_STATUSES = (
 PO_SORT_FIELDS = ("created_at", "expected_date", "erp_po_number")
 ASN_SORT_FIELDS = ("created_at", "expected_arrival_at")
 HIDE_QTY_ROLE = "nv-nhan"
+
+
+def _task_req(**kwargs: Any) -> Any:
+    return SimpleNamespace(**kwargs)
 
 
 def _validation_error(message: str, **details: Any) -> BusinessError:
@@ -1109,7 +1114,7 @@ class InboundService:
                 db=db,
                 warehouse_id=warehouse_id,
                 creator_id=user.user_id,
-                req=CreateTaskRequest(  # type: ignore[arg-type]
+                req=_task_req(  # type: ignore[arg-type]
                     zone_id=None,
                     assigned_to=None,
                     note=None,
@@ -1126,6 +1131,15 @@ class InboundService:
         grn.version_no += 1
         if asn_obj is not None and asn_obj.status != "COMPLETED":
             asn_obj.status = "COMPLETED"
+
+        mark_object_approval_executed(
+            db=db,
+            warehouse_id=warehouse_id,
+            object_type="GRN_DISCREPANCY",
+            object_id=grn.grn_id,
+            actor_user_id=user.user_id,
+            note="Hoàn tất nhập kho GRN sau phê duyệt chênh lệch",
+        )
 
         enqueue_to_erp(
             db=db,
@@ -1328,11 +1342,52 @@ class InboundService:
                     bucket="AVAILABLE",
                 )
 
-        remaining = InboundRepository.get_pallet_balances(db, pallet_id)
-        if not remaining:
+        total_moved_qty = (
+            sum((item.qty for item in req.lines), Decimal("0"))
+            if req.lines
+            else sum((b["qty_available"] for b in balances), Decimal("0"))
+        )
+        remaining_at_source = InboundRepository.get_pallet_balances_at_location(
+            db, pallet_id, from_loc
+        )
+        if not remaining_at_source:
             new_status = "STORED"
             new_loc = req.location_id
-            InboundRepository.complete_putaway_task_if_any(db, pallet_id, user.user_id)
+            putaway_task = InboundRepository.get_open_putaway_task(db, pallet_id)
+            if putaway_task is not None:
+                tid = putaway_task["task_id"]
+                tver = putaway_task["version_no"]
+                tstatus = putaway_task["status"]
+                if tstatus == "UNASSIGNED":
+                    assigned = assign_task(
+                        db=db,
+                        task_id=tid,
+                        assigner_id=user.user_id,
+                        req=_task_req(assigned_to_user_id=user.user_id, version_no=tver),
+                        warehouse_id=warehouse_id,
+                    )
+                    tver = assigned.version_no
+                    tstatus = assigned.status
+                if tstatus == "ASSIGNED" and str(
+                    putaway_task["assigned_to"] or user.user_id
+                ) == str(user.user_id):
+                    accepted = accept_task(
+                        db=db,
+                        task_id=tid,
+                        worker_id=user.user_id,
+                        req=_task_req(version_no=tver),
+                        warehouse_id=warehouse_id,
+                    )
+                    tver = accepted.version_no
+                    tstatus = accepted.status
+                if tstatus == "IN_PROGRESS":
+                    complete_task(
+                        db=db,
+                        task_id=tid,
+                        worker_id=user.user_id,
+                        req=_task_req(version_no=tver, completed_qty=total_moved_qty),
+                        warehouse_id=warehouse_id,
+                    )
         else:
             new_status = "PUTAWAY_IN_PROGRESS"
             new_loc = from_loc

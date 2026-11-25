@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 from server.app.core.audit import create_audit_log
 from server.app.core.exceptions import BusinessError
 from server.app.core.rbac import UserContext, enforce_warehouse_scope
-from server.app.modules.approvals import create_approval_request
+from server.app.modules.approvals import (
+    create_approval_request,
+    mark_object_approval_executed,
+)
 from server.app.modules.cycle_count.models import (
     CycleCountAttempt,
     CycleCountLine,
@@ -400,6 +403,14 @@ class CycleCountService:
             sheet.status = "CLOSED"
             sheet.closed_at = datetime.now(timezone.utc)
             sheet.version_no += 1
+            mark_object_approval_executed(
+                db=db,
+                warehouse_id=warehouse_id,
+                object_type="CYCLE_COUNT_DIFF",
+                object_id=sheet.count_sheet_id,
+                actor_user_id=user.user_id,
+                note="Đóng phiếu kiểm kê và ghi tồn điều chỉnh sau duyệt",
+            )
             db.flush()
 
         create_audit_log(

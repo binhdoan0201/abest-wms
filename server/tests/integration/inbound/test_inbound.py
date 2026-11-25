@@ -146,7 +146,19 @@ def test_inbound_full_flow_receive_submit_complete_putaway() -> None:
             },
         )
         assert r_put.status_code == 200
-        assert r_put.json()["data"]["status"] in ("PUTAWAY_IN_PROGRESS", "STORED")
+        assert r_put.json()["data"]["status"] == "STORED"
+        db_chk = SessionLocal()
+        try:
+            task_status = db_chk.execute(
+                text(
+                    "SELECT status::text FROM tasks "
+                    "WHERE ref_doc_type = 'PALLET' AND ref_doc_id = :pid AND task_type = 'PUTAWAY';"
+                ),
+                {"pid": uuid.UUID(pallet_id)},
+            ).scalar()
+            assert task_status == "COMPLETED"
+        finally:
+            db_chk.close()
     finally:
         # Giải phóng vị trí kệ về EMPTY; giữ nguyên dữ liệu lịch sử bất biến
         db = SessionLocal()
@@ -163,3 +175,104 @@ def test_inbound_full_flow_receive_submit_complete_putaway() -> None:
                 db.commit()
         finally:
             db.close()
+
+
+def test_grn_discrepancy_approval_marks_executed_on_complete(
+    client, db_tokens, inbound_seed
+) -> None:
+    """GRN lệch -> duyệt -> complete GRN chuyển execution_status = EXECUTED_INVENTORY."""
+    nhan_token = db_tokens["nv_nhan"]
+    thukho_token = db_tokens["thukho"]
+
+    po_number = f"PO-EXEC-{uuid.uuid4().hex[:8].upper()}"
+    db = SessionLocal()
+    grn_id = None
+    try:
+        wh_id = db.execute(text("SELECT warehouse_id FROM warehouses LIMIT 1;")).scalar()
+        sup_id = db.execute(text("SELECT supplier_id FROM suppliers LIMIT 1;")).scalar()
+        sku_row = db.execute(
+            text("SELECT sku_id, base_uom_id FROM skus WHERE is_active = TRUE LIMIT 1;")
+        ).first()
+        assert wh_id and sup_id and sku_row
+        sku_id, uom_id = sku_row[0], sku_row[1]
+
+        po_id = uuid.uuid4()
+        po_line_id = uuid.uuid4()
+        db.execute(
+            text(
+                "INSERT INTO purchase_orders "
+                "(po_id, erp_po_number, warehouse_id, supplier_id, status) "
+                "VALUES (:po_id, :po_no, :wh_id, :sup_id, 'OPEN');"
+            ),
+            {"po_id": po_id, "po_no": po_number, "wh_id": wh_id, "sup_id": sup_id},
+        )
+        db.execute(
+            text(
+                "INSERT INTO po_lines "
+                "(po_line_id, po_id, line_no, sku_id, uom_id, qty_ordered, unit_price) "
+                "VALUES (:lid, :po_id, 1, :sku_id, :uom_id, 10.000, 100000.00);"
+            ),
+            {"lid": po_line_id, "po_id": po_id, "sku_id": sku_id, "uom_id": uom_id},
+        )
+        db.commit()
+
+        r_grn = client.post(
+            "/api/v1/grns",
+            headers={"Authorization": f"Bearer {nhan_token}"},
+            json={"po_id": str(po_id)},
+        )
+        assert r_grn.status_code == 201
+        grn = r_grn.json()["data"]
+        grn_id = grn["grn_id"]
+        line_id = grn["lines"][0]["grn_line_id"]
+
+        r_cnt = client.patch(
+            f"/api/v1/grns/{grn_id}/lines/{line_id}/count",
+            headers={"Authorization": f"Bearer {nhan_token}"},
+            json={"qty_counted_good": "8.000", "qty_counted_damaged": "0.000"},
+        )
+        assert r_cnt.status_code == 200
+
+        r_sub = client.post(
+            f"/api/v1/grns/{grn_id}/submit",
+            headers={"Authorization": f"Bearer {nhan_token}"},
+            json={"version_no": grn["version_no"]},
+        )
+        assert r_sub.status_code == 200
+        sub_data = r_sub.json()["data"]
+        assert sub_data["status"] == "PENDING_D1"
+        approval_id = sub_data["approval_id"]
+        cur_ver = sub_data["version_no"]
+
+        r_app_detail = client.get(
+            f"/api/v1/approvals/{approval_id}",
+            headers={"Authorization": f"Bearer {thukho_token}"},
+        )
+        assert r_app_detail.status_code == 200
+        app_ver = r_app_detail.json()["data"]["version_no"]
+
+        r_approve = client.post(
+            f"/api/v1/approvals/{approval_id}/approve",
+            headers={"Authorization": f"Bearer {thukho_token}"},
+            json={
+                "recommendation_or_reason": "Xác nhận thiếu 2 kiện theo biên bản giao nhận",
+                "version_no": app_ver,
+            },
+        )
+        assert r_approve.status_code == 200
+        assert r_approve.json()["data"]["execution_status"] == "WAITING_EXECUTION"
+
+        r_comp = client.post(
+            f"/api/v1/grns/{grn_id}/complete",
+            headers={"Authorization": f"Bearer {nhan_token}"},
+            json={"version_no": cur_ver},
+        )
+        assert r_comp.status_code == 200
+
+        exec_status = db.execute(
+            text("SELECT execution_status::text FROM approval_requests WHERE approval_id = :aid;"),
+            {"aid": uuid.UUID(approval_id)},
+        ).scalar()
+        assert exec_status == "EXECUTED_INVENTORY"
+    finally:
+        db.close()

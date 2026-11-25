@@ -461,24 +461,58 @@ class InboundRepository:
         ]
 
     @staticmethod
-    def complete_putaway_task_if_any(
-        db: Session, pallet_id: uuid.UUID, actor_id: uuid.UUID
-    ) -> None:
-        db.execute(
+    def get_pallet_balances_at_location(
+        db: Session, pallet_id: uuid.UUID, location_id: uuid.UUID
+    ) -> list[dict[str, Any]]:
+        rows = db.execute(
             text(
                 """
-                UPDATE tasks
-                SET status = 'COMPLETED',
-                    completed_at = NOW(),
-                    progress_pct = 100.00,
-                    assigned_to = COALESCE(assigned_to, :actor),
-                    version_no = version_no + 1,
-                    updated_at = NOW()
+                SELECT ib.balance_id, ib.location_id, ib.sku_id, ib.lot_id,
+                       ib.serial_number, ib.qty_available, s.storage_requirement
+                FROM inventory_balances ib
+                JOIN skus s ON s.sku_id = ib.sku_id
+                WHERE ib.pallet_id = :pid
+                  AND ib.location_id = :loc_id
+                  AND ib.qty_available > 0;
+                """
+            ),
+            {"pid": pallet_id, "loc_id": location_id},
+        ).fetchall()
+        return [
+            {
+                "balance_id": r[0],
+                "location_id": r[1],
+                "sku_id": r[2],
+                "lot_id": r[3],
+                "serial_number": r[4],
+                "qty_available": Decimal(str(r[5])),
+                "storage_requirement": r[6],
+            }
+            for r in rows
+        ]
+
+    @staticmethod
+    def get_open_putaway_task(db: Session, pallet_id: uuid.UUID) -> dict[str, Any] | None:
+        row = db.execute(
+            text(
+                """
+                SELECT task_id, status::text, assigned_to, version_no
+                FROM tasks
                 WHERE ref_doc_type = 'PALLET'
                   AND ref_doc_id = :pid
                   AND task_type = 'PUTAWAY'
-                  AND status NOT IN ('COMPLETED', 'CANCELLED');
+                  AND status NOT IN ('COMPLETED', 'CANCELLED')
+                ORDER BY created_at DESC
+                LIMIT 1;
                 """
             ),
-            {"pid": pallet_id, "actor": actor_id},
-        )
+            {"pid": pallet_id},
+        ).first()
+        if not row:
+            return None
+        return {
+            "task_id": row[0],
+            "status": row[1],
+            "assigned_to": row[2],
+            "version_no": int(row[3]),
+        }
