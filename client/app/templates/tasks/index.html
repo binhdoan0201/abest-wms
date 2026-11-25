@@ -1,0 +1,76 @@
+{% extends "_base/layout.html" %}
+{% block title %}?i?u ph?i Nhi?m v? Kho - ABEST WMS{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-800">?i?u ph?i &amp; Qu?n l? Nhi?m v? Kho</h1>
+      <p class="text-sm text-slate-500">Ph?n c?ng c?ng vi?c theo kh?u, ?i?u chuy?n nh?n s? v? thi?t l?p m?c ?? ?u ti?n</p>
+    </div>
+    <form method="get" action="/tasks" class="flex flex-wrap items-center gap-2">
+      {% if is_supervisor %}
+      <select name="scope" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+        <option value="all" {% if filters.scope == 'all' %}selected{% endif %}>T?t c? nhi?m v? kho</option>
+        <option value="queue" {% if filters.scope == 'queue' %}selected{% endif %}>H?ng ch? ch?a giao (Queue)</option>
+      </select>
+      {% endif %}
+      <select name="status" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+        <option value="" {% if not filters.status %}selected{% endif %}>T?t c? tr?ng th?i</option>
+        <option value="UNASSIGNED" {% if filters.status == 'UNASSIGNED' %}selected{% endif %}>UNASSIGNED</option>
+        <option value="ASSIGNED" {% if filters.status == 'ASSIGNED' %}selected{% endif %}>ASSIGNED</option>
+        <option value="IN_PROGRESS" {% if filters.status == 'IN_PROGRESS' %}selected{% endif %}>IN_PROGRESS</option>
+        <option value="REJECTED" {% if filters.status == 'REJECTED' %}selected{% endif %}>REJECTED</option>
+        <option value="COMPLETED" {% if filters.status == 'COMPLETED' %}selected{% endif %}>COMPLETED</option>
+        <option value="CANCELLED" {% if filters.status == 'CANCELLED' %}selected{% endif %}>CANCELLED</option>
+      </select>
+      <select name="priority" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+        <option value="" {% if not filters.priority %}selected{% endif %}>M?i ?? ?u ti?n</option>
+        <option value="URGENT" {% if filters.priority == 'URGENT' %}selected{% endif %}>URGENT (Kh?n c?p)</option>
+        <option value="HIGH" {% if filters.priority == 'HIGH' %}selected{% endif %}>HIGH (Cao)</option>
+        <option value="NORMAL" {% if filters.priority == 'NORMAL' %}selected{% endif %}>NORMAL (B?nh th??ng)</option>
+      </select>
+      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">L?c task</button>
+    </form>
+  </div>
+
+  {% if is_supervisor %}
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+    <h2 class="text-sm font-bold text-slate-800 mb-3">+ T?o nhi?m v? th? c?ng &amp; Thi?t l?p ?u ti?n</h2>
+    <form hx-post="/tasks/create" hx-target="#tasks-board-panel" hx-swap="innerHTML" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+      <select name="task_type" required class="rounded-lg border border-slate-300 px-3 py-2 text-xs bg-white">
+        <option value="RECEIVING">RECEIVING (Nh?n h?ng)</option>
+        <option value="PUTAWAY">PUTAWAY (C?t h?ng)</option>
+        <option value="PICKING">PICKING (So?n h?ng)</option>
+        <option value="PACKING">PACKING (??ng g?i)</option>
+        <option value="CYCLE_COUNT">CYCLE_COUNT (Ki?m k?)</option>
+        <option value="RECOUNT">RECOUNT (??m l?i)</option>
+        <option value="INTERNAL_MOVE">INTERNAL_MOVE (Di chuy?n n?i b?)</option>
+        <option value="SCRAP_EXECUTION">SCRAP_EXECUTION (H?y h?ng)</option>
+      </select>
+      <select name="stage" required class="rounded-lg border border-slate-300 px-3 py-2 text-xs bg-white">
+        <option value="NHAN_HANG">NHAN_HANG</option>
+        <option value="CAT_HANG">CAT_HANG</option>
+        <option value="SOAN_HANG">SOAN_HANG</option>
+        <option value="DONG_GOI_XUAT">DONG_GOI_XUAT</option>
+        <option value="KIEM_KE">KIEM_KE</option>
+        <option value="QUAN_LY_CHUNG">QUAN_LY_CHUNG</option>
+      </select>
+      <input type="text" name="ref_doc_type" placeholder="Lo?i CT (PO, SO, GRN...)" required class="rounded-lg border border-slate-300 px-3 py-2 text-xs">
+      <input type="text" name="ref_doc_id" placeholder="UUID ch?ng t? tham chi?u" required class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-mono">
+      <select name="priority" class="rounded-lg border border-slate-300 px-3 py-2 text-xs bg-white font-semibold">
+        <option value="NORMAL">?u ti?n: NORMAL</option>
+        <option value="HIGH">?u ti?n: HIGH</option>
+        <option value="URGENT">?u ti?n: URGENT</option>
+      </select>
+      <button type="submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700">
+        T?o nhi?m v?
+      </button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div id="tasks-board-panel">
+    {% include "tasks/_tasks_panel.html" %}
+  </div>
+</div>
+{% endblock %}
