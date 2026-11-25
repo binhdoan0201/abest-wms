@@ -152,7 +152,7 @@ class InboundRepository:
 
     @staticmethod
     def get_zone_type(db: Session, zone_id: uuid.UUID) -> str | None:
-        return db.scalar(
+        return db.scalar(  # type: ignore[no-any-return]
             text("SELECT zone_type FROM zones WHERE zone_id = :zid;"), {"zid": zone_id}
         )
 
@@ -233,7 +233,7 @@ class InboundRepository:
 
     @staticmethod
     def get_first_dock_location(db: Session, warehouse_id: uuid.UUID) -> uuid.UUID | None:
-        return db.scalar(
+        return db.scalar(  # type: ignore[no-any-return]
             text("""
                 SELECT l.location_id
                 FROM locations l
