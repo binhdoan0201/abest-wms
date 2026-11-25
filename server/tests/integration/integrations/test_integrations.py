@@ -143,9 +143,13 @@ def test_po_without_handler_is_pending_then_processed_after_register(
         return uuid.uuid4()
 
     register_erp_handler("PO", handler)
+    # Chạy hàng đợi chung phải thành công; dòng của test được xử lý chắc chắn bằng retry theo
+    # sync_id vì hàng đợi có thể còn dòng chờ của module khác chiếm chỗ trong lô.
     resp = client.post("/api/v1/integrations/sync-logs/process", headers=quanly)
     assert resp.status_code == 200
-    assert resp.json()["data"]["SUCCESS"] >= 1
+    if _log(quanly, sync_id)["status"] == "PENDING":
+        retry = client.post(f"/api/v1/integrations/sync-logs/{sync_id}/retry", headers=quanly)
+        assert retry.status_code == 200, retry.text
     log = _log(quanly, sync_id)
     assert log["status"] == "SUCCESS"
     assert log["doc_id"]
@@ -332,14 +336,17 @@ def test_outbox_reply_to_erp_retries_technical_error(
         json={"system": "ERP", "error_category": "TECHNICAL_ERROR", "times": 100},
     )
     assert resp.status_code == 200
-    client.post("/api/v1/integrations/sync-logs/process", headers=quanly)
+    # Thử lại đúng dòng phản hồi của test: không phụ thuộc dòng chờ của module khác.
+    sync_id = reply_log()["sync_id"]
+    retry_url = f"/api/v1/integrations/sync-logs/{sync_id}/retry"
+    assert client.post(retry_url, headers=quanly).status_code == 200
     log = reply_log()
     assert log["status"] == "FAILED_TECHNICAL"
     assert log["error_category"] == "TECHNICAL_ERROR"
     assert log["retry_count"] == 1
 
     get_erp_gateway().configure_failures("NONE", 0)
-    client.post("/api/v1/integrations/sync-logs/process", headers=quanly)
+    assert client.post(retry_url, headers=quanly).status_code == 200
     log = reply_log()
     assert log["status"] == "SUCCESS"
     assert log["technical_meta"]["response"]["erp_ref"].startswith("ERP-SO-")
