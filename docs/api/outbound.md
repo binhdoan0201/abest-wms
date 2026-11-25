@@ -14,7 +14,7 @@
 - Lỗi: `NOT_FOUND` 404
 
 ### POST /api/v1/outbound-orders/{order_id}/allocate
-- Mục đích: Cấp phát tồn kho theo FEFO/FIFO, ghi `inventory_allocations` và giữ tồn `ALLOCATED`
+- Mục đích: Cấp phát tồn kho theo FEFO/FIFO, ghi `inventory_allocations` và giữ tồn `ALLOCATED`; loại bỏ các lô đã hết hạn (`expiry_date < CURRENT_DATE`) hoặc có hạn dùng nhỏ hơn ngày giao (`expiry_date < cutoff_time.date()`) khi có `cutoff_time`
 - Vai trò: `thukho` (quyền `SO-1`, mức `G`; `quanly` chỉ có mức `V` nên bị từ chối 403)
 - Phản hồi 200: Kết quả cấp phát tồn kho cho đơn
 - Lỗi: `NOT_FOUND` 404, `VERSION_CONFLICT` 409, `INVALID_STATE` 409, `ORDER_FROZEN` 409, `OUTBOUND_INSUFFICIENT_ALLOCATABLE_STOCK` 409
