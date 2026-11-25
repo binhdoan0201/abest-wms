@@ -177,12 +177,10 @@ def test_inbound_full_flow_receive_submit_complete_putaway() -> None:
             db.close()
 
 
-def test_grn_discrepancy_approval_marks_executed_on_complete(
-    client, db_tokens, inbound_seed
-) -> None:
+def test_grn_discrepancy_approval_marks_executed_on_complete() -> None:
     """GRN lệch -> duyệt -> complete GRN chuyển execution_status = EXECUTED_INVENTORY."""
-    nhan_token = db_tokens["nv_nhan"]
-    thukho_token = db_tokens["thukho"]
+    nhan_token = _login("nv_nhan")
+    thukho_token = _login("thukho")
 
     po_number = f"PO-EXEC-{uuid.uuid4().hex[:8].upper()}"
     db = SessionLocal()
