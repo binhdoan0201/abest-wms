@@ -711,6 +711,27 @@ def _load_config(db: Session, user: UserContext, raw_id: str, for_update: bool) 
 # ----------------------------------------------------------------------------- hàm công khai
 
 
+def find_by_code(
+    db: Session, resource: str, code: str, warehouse_id: uuid.UUID | None = None
+) -> dict[str, Any] | None:
+    """Hàm công khai: tìm bản ghi danh mục theo cột mã (ví dụ mã ERP), trả None nếu không có.
+
+    Dùng cho `integrations` đổi mã ERP sang ID nội bộ. `resource` là tên tài nguyên API
+    (`warehouses`, `suppliers`, `customers`, `skus`, `locations`...). Tài nguyên theo kho
+    (`zones`, `locations`) bắt buộc truyền `warehouse_id`.
+    """
+    spec = _get_spec(resource)
+    conditions: list[ColumnElement[bool]] = []
+    if spec.scope == "warehouse":
+        if warehouse_id is None:
+            raise ValueError(f"find_by_code({resource}) cần warehouse_id")
+        conditions.append(spec.model.warehouse_id == warehouse_id)
+    obj = MasterDataRepository.get_by_pk(
+        db, spec.model, _column(spec, spec.code_column), code.strip(), conditions=conditions
+    )
+    return _raw_dict(obj) if obj is not None else None
+
+
 def get_warehouse_config(db: Session, warehouse_id: uuid.UUID) -> dict[str, Any]:
     """Hàm công khai: toàn bộ cấu hình kho (NUMERIC giữ kiểu Decimal) cho module khác."""
     config = MasterDataRepository.get_config(db, warehouse_id)
