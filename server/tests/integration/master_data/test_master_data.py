@@ -414,7 +414,49 @@ def test_update_config_threshold_rule_and_permissions(
     assert client.patch(url, headers=worker, json={"picking_rule": "FEFO"}).status_code == 403
 
 
-def test_users_and_roles_not_implemented_yet(admin: dict[str, str]) -> None:
+def test_users_write_and_roles_not_implemented_yet(admin: dict[str, str]) -> None:
+    for method, path in (("get", "/api/v1/roles"), ("post", "/api/v1/users")):
+        resp = getattr(client, method)(path, headers=admin)
+        assert resp.status_code == 501, path
+        assert _error(resp) == "NOT_IMPLEMENTED"
+
+
+# ----------------------------------------------------------------------------- users (đọc)
+
+
+def test_list_users_admin_sees_all_fields(admin: dict[str, str]) -> None:
     resp = client.get("/api/v1/users", headers=admin)
-    assert resp.status_code == 501
-    assert _error(resp) == "NOT_IMPLEMENTED"
+    assert resp.status_code == 200
+    body = resp.json()
+    users = {u["username"]: u for u in body["data"]}
+    assert {"admin", "thukho", "nv_soan"} <= set(users)
+    assert "email" in users["thukho"]
+    assert users["nv_soan"]["role_code"] == "nv-soan"
+    assert users["nv_soan"]["is_active"] is True
+    assert users["nv_soan"]["can_receive_tasks"] is True
+
+    other = client.get(f"/api/v1/users?warehouse_id={uuid.uuid4()}", headers=admin)
+    assert other.status_code == 200 and other.json()["data"] == []
+
+
+def test_list_users_dispatcher_scoped_without_contact_fields() -> None:
+    """thukho, quanly (TK-1.1) xem người trong kho mình để giao task, không thấy email, SĐT."""
+    for username in ("thukho", "quanly"):
+        resp = client.get("/api/v1/users?role_code=nv-soan", headers=_h(username))
+        assert resp.status_code == 200, username
+        data = resp.json()["data"]
+        assert [u["username"] for u in data] == ["nv_soan"]
+        assert not {"email", "phone", "last_login_at"} & set(data[0])
+
+    # thukho gửi warehouse_id kho khác thì vẫn chỉ xem kho của mình.
+    scoped = client.get(f"/api/v1/users?warehouse_id={uuid.uuid4()}", headers=_h("thukho"))
+    assert scoped.status_code == 200 and scoped.json()["data"]
+
+
+def test_list_users_forbidden_and_validation(admin: dict[str, str]) -> None:
+    for username in ("bgd", "nv_soan", "nv_nhan"):
+        assert client.get("/api/v1/users", headers=_h(username)).status_code == 403, username
+    for query in ("role_code=xx", "status=DELETED", "page_size=101", "page=0", "warehouse_id=abc"):
+        resp = client.get(f"/api/v1/users?{query}", headers=admin)
+        assert resp.status_code == 422, query
+        assert _error(resp) == "VALIDATION_ERROR"

@@ -4,7 +4,8 @@ Khai báo endpoint theo Mục 4.2 Chuẩn API và hợp đồng `docs/api/master
 - 10 danh mục, mỗi danh mục 5 endpoint: GET /{res}, GET /{res}/{id}, POST /{res},
   PATCH /{res}/{id}, POST /{res}/{id}/deactivate. Đọc: mọi vai trò đã đăng nhập; ghi: `AD-1`.
 - Cấu hình kho: GET, PATCH /warehouses/{id}/config.
-- `users`, `roles`: làm ở giai đoạn sau cùng màn hình Admin (A-11), hiện trả 501.
+- `GET /users` (chỉ đọc): `admin` xem mọi kho; `thukho`, `quanly` (TK-1.1) xem người trong kho
+  mình để giao task. Các endpoint còn lại của `users`, `roles` làm cùng A-11, hiện trả 501.
 """
 
 from typing import Any
@@ -39,11 +40,12 @@ from server.app.modules.master_data.schemas import (
     ZoneCreate,
     ZoneUpdate,
 )
-from server.app.modules.master_data.services import MasterDataService
+from server.app.modules.master_data.services import MasterDataService, list_users
 
 router = APIRouter(tags=["Master Data"])
 
 WRITE_PERMISSION = "AD-1"
+USER_DISPATCH_PERMISSION = "TK-1.1"  # điều phối task: cần xem danh sách nhân viên để giao việc
 
 # Tài nguyên -> (schema tạo, schema sửa)
 MASTER_DATA_RESOURCES: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
@@ -177,12 +179,27 @@ def _not_implemented(path: str) -> BusinessError:
     )
 
 
+@router.get("/users", summary="Danh sách người dùng (chỉ đọc)", operation_id="list_users")
+def list_users_route(
+    request: Request,
+    _perm: str = Depends(require_permission(WRITE_PERMISSION, USER_DISPATCH_PERMISSION)),
+    user_ctx: UserContext = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict[str, Any]:
+    items, total, page, page_size = list_users(db, user_ctx, dict(request.query_params))
+    return success_response(data=items, page=page, page_size=page_size, total=total)
+
+
 def _register_admin_routes(admin_res: str) -> None:
     """`users`, `roles`: giữ chỗ endpoint (yêu cầu AD-1), trả 501 đến khi làm A-11."""
 
-    @router.get(f"/{admin_res}", summary=f"Danh sách {admin_res}", operation_id=f"list_{admin_res}")
-    def list_admin_items(_perm: str = Depends(require_permission(WRITE_PERMISSION))) -> None:
-        raise _not_implemented(f"GET /{admin_res}")
+    if admin_res != "users":
+
+        @router.get(
+            f"/{admin_res}", summary=f"Danh sách {admin_res}", operation_id=f"list_{admin_res}"
+        )
+        def list_admin_items(_perm: str = Depends(require_permission(WRITE_PERMISSION))) -> None:
+            raise _not_implemented(f"GET /{admin_res}")
 
     @router.get(
         f"/{admin_res}/{{item_id}}",
