@@ -200,7 +200,7 @@ def test_grn_discrepancy_approval_marks_executed_on_complete() -> None:
             text(
                 "INSERT INTO purchase_orders "
                 "(po_id, erp_po_number, warehouse_id, supplier_id, status) "
-                "VALUES (:po_id, :po_no, :wh_id, :sup_id, 'OPEN');"
+                "VALUES (:po_id, :po_no, :wh_id, :sup_id, 'PENDING');"
             ),
             {"po_id": po_id, "po_no": po_number, "wh_id": wh_id, "sup_id": sup_id},
         )
