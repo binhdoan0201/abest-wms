@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from client.app.core.api_client import ClientApiError
-from client.app.core.auth_guard import NeedAuthException, get_optional_user
+from client.app.core.auth_guard import NeedAuthException, get_optional_user, home_path
 from client.app.core.config import get_client_settings
 from client.app.core.middleware import CompactCsrfMiddleware
 from client.app.modules.approvals import router as approvals_router
@@ -96,11 +96,11 @@ def create_client_app() -> FastAPI:
     # 5. Các tuyến điều hướng chung
     @app.get("/", response_class=HTMLResponse)
     def root_page(request: Request) -> Response:
-        """Trang gốc: Nếu đã đăng nhập chuyển tới /inventory, ngược lại chuyển sang /login."""
+        """Trang gốc: đã đăng nhập thì vào trang đầu theo vai trò, chưa thì sang /login."""
         user = get_optional_user(request)
         if not user:
             return RedirectResponse(url="/login", status_code=303)
-        return RedirectResponse(url="/inventory", status_code=303)
+        return RedirectResponse(url=home_path(user), status_code=303)
 
     @app.get("/health")
     def health_check() -> dict[str, str]:

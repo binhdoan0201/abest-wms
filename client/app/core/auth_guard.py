@@ -44,6 +44,17 @@ def get_optional_user(request: Request) -> dict[str, Any] | None:
         return None
 
 
+# Trang đầu sau đăng nhập: BGĐ vào bảng điều hành (A-13), vai trò khác vào tra cứu tồn.
+HOME_BY_ROLE: dict[str, str] = {"bgd": "/dashboard"}
+DEFAULT_HOME = "/inventory"
+
+
+def home_path(user: dict[str, Any] | None) -> str:
+    """Đường dẫn trang đầu theo vai trò."""
+    role_code = (user or {}).get("role_code", "")
+    return HOME_BY_ROLE.get(role_code, DEFAULT_HOME)
+
+
 # Định nghĩa danh mục menu toàn hệ thống
 NAV_ITEMS: list[dict[str, Any]] = [
     {
