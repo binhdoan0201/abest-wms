@@ -20,9 +20,7 @@ HIDE_QTY_ROLE = "nv-nhan"  # đặc tả 5.4.9: nv-nhan không thấy số lư�
 
 
 def _validation_error(message: str, **details: Any) -> BusinessError:
-    return BusinessError(
-        code="VALIDATION_ERROR", message=message, http_status=422, details=details
-    )
+    return BusinessError(code="VALIDATION_ERROR", message=message, http_status=422, details=details)
 
 
 def _fmt_qty(value: Decimal | None) -> str | None:
@@ -165,9 +163,7 @@ class InboundService:
         warehouse_id = _require_warehouse(user)
         page, page_size = _parse_paging(page, page_size)
         if status is not None and status not in ASN_STATUSES:
-            raise _validation_error(
-                "Giá trị lọc `status` không hợp lệ", allowed=list(ASN_STATUSES)
-            )
+            raise _validation_error("Giá trị lọc `status` không hợp lệ", allowed=list(ASN_STATUSES))
         sort_name, descending = _parse_sort(sort, ASN_SORT_FIELDS, "-created_at")
         rows, total = InboundRepository.list_asns(
             db,
