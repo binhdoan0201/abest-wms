@@ -222,19 +222,27 @@ def test_grn_discrepancy_approval_marks_executed_on_complete() -> None:
         assert r_grn.status_code == 201
         grn = r_grn.json()["data"]
         grn_id = grn["grn_id"]
-        line_id = grn["lines"][0]["grn_line_id"]
 
-        r_cnt = client.patch(
-            f"/api/v1/grns/{grn_id}/lines/{line_id}/count",
+        r_line = client.post(
+            f"/api/v1/grns/{grn_id}/lines",
             headers={"Authorization": f"Bearer {nhan_token}"},
-            json={"qty_counted_good": "8.000", "qty_counted_damaged": "0.000"},
+            json={
+                "sku_id": str(sku_id),
+                "lot_number": f"LOT-EXEC-{uuid.uuid4().hex[:6].upper()}",
+                "expiry_date": (date.today() + timedelta(days=365)).isoformat(),
+                "uom_code": uom_id,
+                "qty_actual": "8",
+                "qty_damaged": "0",
+                "version_no": grn["version_no"],
+            },
         )
-        assert r_cnt.status_code == 200
+        assert r_line.status_code == 201
+        line_ver = r_line.json()["data"]["grn_version_no"]
 
         r_sub = client.post(
             f"/api/v1/grns/{grn_id}/submit",
             headers={"Authorization": f"Bearer {nhan_token}"},
-            json={"version_no": grn["version_no"]},
+            json={"version_no": line_ver},
         )
         assert r_sub.status_code == 200
         sub_data = r_sub.json()["data"]
