@@ -1016,3 +1016,144 @@ def escalate_expired_requests(db: Session, user_ctx: UserContext) -> int:
         new_values={"escalated_count": count},
     )
     return count
+
+
+ALLOWED_POST_APPROVAL_EXEC_STATUSES = frozenset(
+    {
+        "EXECUTED_INVENTORY",
+        "SCRAP_EXECUTED",
+        "SYNCED_ERP",
+        "FAILED_SYNC",
+    }
+)
+
+
+def _apply_execution_status_update(
+    db: Session,
+    approval: ApprovalRequest,
+    actor_user_id: uuid.UUID,
+    execution_status: str,
+    note: str | None = None,
+) -> ApprovalRequest:
+    """Cập nhật `execution_status` cho một hồ sơ đã `APPROVED` kèm audit log."""
+    if execution_status not in ALLOWED_POST_APPROVAL_EXEC_STATUSES:
+        raise BusinessError(
+            code="VALIDATION_ERROR",
+            message=f"Trạng thái thực thi hậu kiểm `{execution_status}` không hợp lệ.",
+            http_status=422,
+            details={"allowed": sorted(ALLOWED_POST_APPROVAL_EXEC_STATUSES)},
+        )
+
+    if str(approval.status) != "APPROVED":
+        raise BusinessError(
+            code="INVALID_STATE",
+            message=(
+                f"Hồ sơ đang ở trạng thái {approval.status}, chỉ cập nhật thực thi khi APPROVED."
+            ),
+            http_status=409,
+        )
+
+    current_exec = str(approval.execution_status)
+    valid_from: dict[str, set[str]] = {
+        "EXECUTED_INVENTORY": {"WAITING_EXECUTION"},
+        "SCRAP_EXECUTED": {"WAITING_SCRAP_EXECUTION"},
+        "SYNCED_ERP": {"EXECUTED_INVENTORY", "SCRAP_EXECUTED", "FAILED_SYNC"},
+        "FAILED_SYNC": {"EXECUTED_INVENTORY", "SCRAP_EXECUTED", "WAITING_EXECUTION"},
+    }
+    if current_exec not in valid_from[execution_status]:
+        raise BusinessError(
+            code="INVALID_STATE",
+            message=(
+                f"Không thể chuyển execution_status từ `{current_exec}` sang `{execution_status}`."
+            ),
+            http_status=409,
+        )
+
+    approval.execution_status = _cast_enum(execution_status, PG_EXEC_STATUS_TYPE)
+    approval.version_no += 1
+    try:
+        db.flush()
+    except (IntegrityError, DBAPIError) as exc:
+        raise translate_db_error(exc) from exc
+
+    create_audit_log(
+        db=db,
+        warehouse_id=approval.warehouse_id,
+        actor_user_id=actor_user_id,
+        action_code="APPROVAL_EXEC_STATUS_UPDATED",
+        entity_name="approval_requests",
+        entity_id=approval.approval_id,
+        old_values={"execution_status": current_exec},
+        new_values={"execution_status": execution_status, "note": note},
+    )
+    return approval
+
+
+def update_approval_execution_status(
+    db: Session,
+    approval_id: uuid.UUID,
+    warehouse_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    execution_status: str = "EXECUTED_INVENTORY",
+    note: str | None = None,
+) -> ApprovalRequest:
+    """Hàm công khai để phân hệ nguồn cập nhật `execution_status` sau khi thực thi hậu kiểm.
+
+    Dùng khi biết `approval_id`; kiểm tra hồ sơ thuộc `warehouse_id`, đã `APPROVED` và đang ở
+    trạng thái chờ thực thi phù hợp (`WAITING_EXECUTION` -> `EXECUTED_INVENTORY`, hoặc cập nhật
+    kết quả đồng bộ ERP `SYNCED_ERP` / `FAILED_SYNC`).
+    """
+    approval = repo.get_approval_by_id(
+        db=db,
+        approval_id=approval_id,
+        warehouse_id=warehouse_id,
+        for_update=True,
+    )
+    if not approval:
+        raise BusinessError(
+            code="NOT_FOUND",
+            message="Không tìm thấy hồ sơ phê duyệt cần cập nhật trạng thái thực thi.",
+            http_status=404,
+        )
+
+    return _apply_execution_status_update(
+        db=db,
+        approval=approval,
+        actor_user_id=actor_user_id,
+        execution_status=execution_status,
+        note=note,
+    )
+
+
+def mark_object_approval_executed(
+    db: Session,
+    warehouse_id: uuid.UUID,
+    object_type: str,
+    object_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    execution_status: str = "EXECUTED_INVENTORY",
+    note: str | None = None,
+) -> ApprovalRequest | None:
+    """Hàm công khai cập nhật `execution_status` theo đối tượng nguồn (`object_type`, `object_id`).
+
+    Trả về `None` nếu đối tượng được tự động duyệt trong dung sai Z (không có bản ghi
+    `approval_requests` ở trạng thái `APPROVED`), giúp phân hệ nguồn (`inbound`, `cycle_count`)
+    gọi thống nhất sau bước ghi tồn kho mà không cần rẽ nhánh kiểm tra có hồ sơ duyệt hay không.
+    """
+    approval = repo.get_latest_approved_by_object(
+        db=db,
+        warehouse_id=warehouse_id,
+        object_type=object_type,
+        object_id=object_id,
+        for_update=True,
+    )
+    if not approval:
+        return None
+
+    return _apply_execution_status_update(
+        db=db,
+        approval=approval,
+        actor_user_id=actor_user_id,
+        execution_status=execution_status,
+        note=note,
+    )
