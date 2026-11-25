@@ -16,9 +16,11 @@ from server.app.core.rbac import UserContext
 from server.app.main import app
 from server.app.modules.approvals import (
     create_approval_request,
+    mark_object_approval_executed,
     resubmit_approval_info,
     services,
     supersede_approval_for_recount,
+    update_approval_execution_status,
 )
 from server.app.modules.approvals.schemas import (
     ApproveDecisionRequest,
@@ -482,3 +484,99 @@ def test_approvals_endpoints_rbac() -> None:
     )
     assert resp_esc_ok.status_code == 200
     assert "escalated_count" in resp_esc_ok.json()["data"]
+
+
+def test_update_approval_execution_status_and_mark_executed() -> None:
+    db = SessionLocal()
+    try:
+        _, nv_nhan = _get_user_by_role(db, "nv-nhan")
+        _, thukho = _get_user_by_role(db, "thukho")
+        assert nv_nhan.warehouse_id is not None
+        grn_id = uuid.uuid4()
+
+        req = create_approval_request(
+            db=db,
+            warehouse_id=nv_nhan.warehouse_id,
+            object_type="GRN_DISCREPANCY",
+            object_id=grn_id,
+            proposer_user_id=nv_nhan.user_id,
+            discrepancy_amount=Decimal("200000"),
+            discrepancy_percent=Decimal("10"),
+        )
+        assert req is not None
+
+        # Không được cập nhật execution_status khi chưa APPROVED
+        with pytest.raises(BusinessError) as exc_not_approved:
+            update_approval_execution_status(
+                db=db,
+                approval_id=req.approval_id,
+                warehouse_id=nv_nhan.warehouse_id,
+                actor_user_id=nv_nhan.user_id,
+            )
+        assert exc_not_approved.value.code == "INVALID_STATE"
+
+        # Duyệt hồ sơ GRN_DISCREPANCY -> trạng thái APPROVED, execution_status = WAITING_EXECUTION
+        thukho_ctx = UserContext(
+            user_id=thukho.user_id,
+            username=thukho.username,
+            role_code="thukho",
+            warehouse_id=thukho.warehouse_id,
+            permissions={"TK-3.2": "D1"},
+        )
+        approved = services.approve_request(
+            db=db,
+            user_ctx=thukho_ctx,
+            approval_id=req.approval_id,
+            req=ApproveDecisionRequest(
+                version_no=req.version_no,
+                recommendation_or_reason="Duyệt chênh lệch nhận hàng để nhập tồn",
+            ),
+        )
+        assert approved.status == "APPROVED"
+        assert approved.execution_status == "WAITING_EXECUTION"
+
+        # Phân hệ nguồn gọi mark_object_approval_executed sau khi ghi tồn kho
+        executed = mark_object_approval_executed(
+            db=db,
+            warehouse_id=nv_nhan.warehouse_id,
+            object_type="GRN_DISCREPANCY",
+            object_id=grn_id,
+            actor_user_id=nv_nhan.user_id,
+            note="Đã ghi tồn kho hoàn tất GRN",
+        )
+        assert executed is not None
+        assert executed.execution_status == "EXECUTED_INVENTORY"
+
+        # Không cho phép đánh dấu EXECUTED_INVENTORY lần hai
+        with pytest.raises(BusinessError) as exc_dup:
+            update_approval_execution_status(
+                db=db,
+                approval_id=req.approval_id,
+                warehouse_id=nv_nhan.warehouse_id,
+                actor_user_id=nv_nhan.user_id,
+                execution_status="EXECUTED_INVENTORY",
+            )
+        assert exc_dup.value.code == "INVALID_STATE"
+
+        # Cho phép chuyển tiếp sang SYNCED_ERP sau khi đồng bộ ERP thành công
+        synced = update_approval_execution_status(
+            db=db,
+            approval_id=req.approval_id,
+            warehouse_id=nv_nhan.warehouse_id,
+            actor_user_id=nv_nhan.user_id,
+            execution_status="SYNCED_ERP",
+        )
+        assert synced.execution_status == "SYNCED_ERP"
+
+        # Đối tượng tự duyệt dung sai Z (không có bản ghi approval_requests) trả về None
+        none_res = mark_object_approval_executed(
+            db=db,
+            warehouse_id=nv_nhan.warehouse_id,
+            object_type="CYCLE_COUNT_DIFF",
+            object_id=uuid.uuid4(),
+            actor_user_id=nv_nhan.user_id,
+        )
+        assert none_res is None
+    finally:
+        db.rollback()
+        db.close()
