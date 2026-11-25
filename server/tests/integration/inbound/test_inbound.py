@@ -111,10 +111,17 @@ def test_inbound_full_flow_receive_submit_complete_putaway() -> None:
         cur_ver = r_sub.json()["data"]["version_no"]
 
         # 4. Hoàn tất GRN -> nhập tồn dock, pallet STAGED, task PUTAWAY (B-06)
+        r_grn_after = client.get(
+            f"/api/v1/grns/{grn_id}",
+            headers={"Authorization": f"Bearer {nhan_token}"},
+        )
+        assert r_grn_after.status_code == 200
+        latest_ver = r_grn_after.json()["data"]["version_no"]
+
         r_comp = client.post(
             f"/api/v1/grns/{grn_id}/complete",
             headers={"Authorization": f"Bearer {nhan_token}"},
-            json={"version_no": cur_ver},
+            json={"version_no": latest_ver},
         )
         assert r_comp.status_code == 200
         comp_data = r_comp.json()["data"]
