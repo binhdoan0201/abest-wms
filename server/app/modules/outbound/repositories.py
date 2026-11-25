@@ -1319,3 +1319,66 @@ class OutboundRepository:
             .first()
         )
         return dict(row) if row else None
+
+    @staticmethod
+    def get_order_by_erp_number(db: Session, erp_order_number: str) -> dict[str, Any] | None:
+        stmt = text(
+            """
+            SELECT order_id, erp_order_number, warehouse_id, status::TEXT AS status
+            FROM outbound_orders
+            WHERE erp_order_number = :erp_order_number
+            LIMIT 1;
+            """
+        )
+        row = db.execute(stmt, {"erp_order_number": erp_order_number}).mappings().first()
+        return dict(row) if row else None
+
+    @staticmethod
+    def update_gi_waybill_and_order_status(
+        db: Session,
+        gi_id: uuid.UUID,
+        order_id: uuid.UUID,
+        waybill_code: str | None,
+    ) -> dict[str, Any]:
+        new_gi_status = "LOADED" if waybill_code else "WAITING_WAYBILL"
+        new_wb_status = "CREATED" if waybill_code else "PENDING"
+        gi_row = (
+            db.execute(
+                text(
+                    """
+                    UPDATE goods_issues
+                    SET tms_waybill_code = COALESCE(:waybill_code, tms_waybill_code),
+                        tms_waybill_status = :wb_status,
+                        status = :gi_status,
+                        version_no = version_no + 1
+                    WHERE gi_id = :gi_id
+                    RETURNING gi_id, gi_number, gi_type::TEXT AS gi_type, warehouse_id,
+                              order_id, vehicle_id, tms_waybill_code, tms_waybill_status,
+                              total_packages, status, version_no;
+                    """
+                ),
+                {
+                    "gi_id": gi_id,
+                    "waybill_code": waybill_code,
+                    "wb_status": new_wb_status,
+                    "gi_status": new_gi_status,
+                },
+            )
+            .mappings()
+            .one()
+        )
+        next_ord = "READY_TO_SHIP" if waybill_code else "WAITING_WAYBILL"
+        db.execute(
+            text(
+                """
+                UPDATE outbound_orders
+                SET status = CAST(:next_ord AS order_status_type),
+                    version_no = version_no + 1,
+                    updated_at = NOW()
+                WHERE order_id = :order_id
+                  AND status IN ('PACKING', 'WAITING_WAYBILL', 'READY_TO_SHIP');
+                """
+            ),
+            {"order_id": order_id, "next_ord": next_ord},
+        )
+        return dict(gi_row)
