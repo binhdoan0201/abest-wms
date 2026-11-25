@@ -282,7 +282,11 @@ class OutboundService:
                     else ("FEFO" if line["is_expiry_tracked"] else default_rule)
                 )
                 cutoff_raw = order.get("cutoff_time")
-                min_expiry = cutoff_raw.date() if hasattr(cutoff_raw, "date") and cutoff_raw is not None else None
+                min_expiry = (
+                    cutoff_raw.date()
+                    if hasattr(cutoff_raw, "date") and cutoff_raw is not None
+                    else None
+                )
                 balances = OutboundRepository.find_allocatable_balances(
                     db=db,
                     warehouse_id=warehouse_id,
