@@ -1,64 +1,64 @@
 {% extends "_base/layout.html" %}
-{% block title %}H?ng ch? Ph? duy?t - ABEST WMS{% endblock %}
+{% block title %}Hàng chờ Phê duyệt - ABEST WMS{% endblock %}
 {% block content %}
 <div class="space-y-6">
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
     <div>
-      <h1 class="text-2xl font-bold text-slate-800">H?ng ch? Ph? duy?t Ch?nh l?ch</h1>
-      <p class="text-sm text-slate-500">X? l? h? s? ph? duy?t ?a c?p D1 (Th? kho) / D2 (Qu?n l?): duy?t x?c th?c l?i, t? ch?i ho?c y?u c?u ??m l?i</p>
+      <h1 class="text-2xl font-bold text-slate-800">Hàng chờ Phê duyệt Chênh lệch</h1>
+      <p class="text-sm text-slate-500">Xử lý hồ sơ phê duyệt đa cấp D1 (Thủ kho) / D2 (Quản lý): duyệt xác thực lại, từ chối hoặc yêu cầu đếm lại</p>
     </div>
     <form method="get" action="/approvals" class="flex flex-wrap items-center gap-2">
       <select name="status" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
-        <option value="" {% if not filters.status %}selected{% endif %}>T?t c? tr?ng th?i</option>
-        <option value="PENDING_D1" {% if filters.status == 'PENDING_D1' %}selected{% endif %}>PENDING_D1 (Ch? Th? kho)</option>
-        <option value="PENDING_D2" {% if filters.status == 'PENDING_D2' %}selected{% endif %}>PENDING_D2 (Ch? Qu?n l?)</option>
-        <option value="PENDING_D3" {% if filters.status == 'PENDING_D3' %}selected{% endif %}>PENDING_D3 (Ch? BG?)</option>
-        <option value="NEED_INFO" {% if filters.status == 'NEED_INFO' %}selected{% endif %}>NEED_INFO (C?n b? sung)</option>
-        <option value="APPROVED" {% if filters.status == 'APPROVED' %}selected{% endif %}>APPROVED (?? duy?t)</option>
-        <option value="REJECTED" {% if filters.status == 'REJECTED' %}selected{% endif %}>REJECTED (T? ch?i)</option>
-        <option value="EXPIRED" {% if filters.status == 'EXPIRED' %}selected{% endif %}>EXPIRED (Qu? h?n)</option>
+        <option value="" {% if not filters.status %}selected{% endif %}>Tất cả trạng thái</option>
+        <option value="PENDING_D1" {% if filters.status == 'PENDING_D1' %}selected{% endif %}>PENDING_D1 (Chờ Thủ kho)</option>
+        <option value="PENDING_D2" {% if filters.status == 'PENDING_D2' %}selected{% endif %}>PENDING_D2 (Chờ Quản lý)</option>
+        <option value="PENDING_D3" {% if filters.status == 'PENDING_D3' %}selected{% endif %}>PENDING_D3 (Chờ BGĐ)</option>
+        <option value="NEED_INFO" {% if filters.status == 'NEED_INFO' %}selected{% endif %}>NEED_INFO (Cần bổ sung)</option>
+        <option value="APPROVED" {% if filters.status == 'APPROVED' %}selected{% endif %}>APPROVED (Đã duyệt)</option>
+        <option value="REJECTED" {% if filters.status == 'REJECTED' %}selected{% endif %}>REJECTED (Từ chối)</option>
+        <option value="EXPIRED" {% if filters.status == 'EXPIRED' %}selected{% endif %}>EXPIRED (Quá hạn)</option>
       </select>
       <select name="tier" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
-        <option value="" {% if not filters.tier %}selected{% endif %}>T?t c? c?p</option>
-        <option value="D1" {% if filters.tier == 'D1' %}selected{% endif %}>C?p D1 (Th? kho)</option>
-        <option value="D2" {% if filters.tier == 'D2' %}selected{% endif %}>C?p D2 (Qu?n l?)</option>
-        <option value="D3" {% if filters.tier == 'D3' %}selected{% endif %}>C?p D3 (BG?)</option>
+        <option value="" {% if not filters.tier %}selected{% endif %}>Tất cả cấp</option>
+        <option value="D1" {% if filters.tier == 'D1' %}selected{% endif %}>Cấp D1 (Thủ kho)</option>
+        <option value="D2" {% if filters.tier == 'D2' %}selected{% endif %}>Cấp D2 (Quản lý)</option>
+        <option value="D3" {% if filters.tier == 'D3' %}selected{% endif %}>Cấp D3 (BGĐ)</option>
       </select>
       <select name="object_type" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
-        <option value="" {% if not filters.object_type %}selected{% endif %}>M?i lo?i ch?ng t?</option>
-        <option value="GRN_DISCREPANCY" {% if filters.object_type == 'GRN_DISCREPANCY' %}selected{% endif %}>Ch?nh l?ch GRN</option>
-        <option value="CYCLE_COUNT_DIFF" {% if filters.object_type == 'CYCLE_COUNT_DIFF' %}selected{% endif %}>Ch?nh l?ch Ki?m k?</option>
-        <option value="STOCK_ADJUSTMENT" {% if filters.object_type == 'STOCK_ADJUSTMENT' %}selected{% endif %}>?i?u ch?nh t?n</option>
-        <option value="STOCK_SCRAP" {% if filters.object_type == 'STOCK_SCRAP' %}selected{% endif %}>H?y h?ng h?ng</option>
-        <option value="OVERTIME_REQUEST" {% if filters.object_type == 'OVERTIME_REQUEST' %}selected{% endif %}>?? xu?t t?ng ca</option>
+        <option value="" {% if not filters.object_type %}selected{% endif %}>Mọi loại chứng từ</option>
+        <option value="GRN_DISCREPANCY" {% if filters.object_type == 'GRN_DISCREPANCY' %}selected{% endif %}>Chênh lệch GRN</option>
+        <option value="CYCLE_COUNT_DIFF" {% if filters.object_type == 'CYCLE_COUNT_DIFF' %}selected{% endif %}>Chênh lệch Kiểm kê</option>
+        <option value="STOCK_ADJUSTMENT" {% if filters.object_type == 'STOCK_ADJUSTMENT' %}selected{% endif %}>Điều chỉnh tồn</option>
+        <option value="STOCK_SCRAP" {% if filters.object_type == 'STOCK_SCRAP' %}selected{% endif %}>Hủy hàng hỏng</option>
+        <option value="OVERTIME_REQUEST" {% if filters.object_type == 'OVERTIME_REQUEST' %}selected{% endif %}>Đề xuất tăng ca</option>
       </select>
       <label class="inline-flex items-center gap-1.5 text-sm text-slate-700 px-2">
         <input type="checkbox" name="expired" value="true" {% if filters.expired == 'true' %}checked{% endif %} class="rounded border-slate-300">
-        <span>Qu? h?n SLA</span>
+        <span>Quá hạn SLA</span>
       </label>
-      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">L?c h? s?</button>
+      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Lọc hồ sơ</button>
     </form>
   </div>
 
   {% if api_error %}
   <div class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
-    <strong>L?i ({{ api_error.code }}):</strong> {{ api_error.message }}
+    <strong>Lỗi ({{ api_error.code }}):</strong> {{ api_error.message }}
   </div>
   {% endif %}
 
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
     <div class="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-        <h2 class="font-semibold text-slate-800 text-sm">Danh s?ch h? s? ({{ meta.total if meta and meta.total is not none else items|length }})</h2>
+        <h2 class="font-semibold text-slate-800 text-sm">Danh sách hồ sơ ({{ meta.total if meta and meta.total is not none else items|length }})</h2>
       </div>
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-slate-200 text-sm">
           <thead class="bg-slate-50 text-slate-600 text-xs uppercase">
             <tr>
-              <th class="px-3 py-2.5 text-left">Lo?i / M? ??i t??ng</th>
-              <th class="px-3 py-2.5 text-left">C?p / Tr?ng th?i</th>
-              <th class="px-3 py-2.5 text-right">Gi? tr? l?ch</th>
-              <th class="px-3 py-2.5 text-right">Thao t?c</th>
+              <th class="px-3 py-2.5 text-left">Loại / Mã đối tượng</th>
+              <th class="px-3 py-2.5 text-left">Cấp / Trạng thái</th>
+              <th class="px-3 py-2.5 text-right">Giá trị lệch</th>
+              <th class="px-3 py-2.5 text-right">Thao tác</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -73,7 +73,7 @@
                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-800">{{ item.current_tier }}</span>
                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold {% if item.status == 'APPROVED' %}bg-emerald-100 text-emerald-800{% elif item.status == 'REJECTED' %}bg-rose-100 text-rose-800{% elif item.status == 'NEED_INFO' %}bg-amber-100 text-amber-800{% else %}bg-blue-100 text-blue-800{% endif %}">{{ item.status }}</span>
                 {% if item.locked_by_viewer_id %}
-                <div class="text-[11px] text-amber-700 mt-1">?? ?ang c? ng??i xem</div>
+                <div class="text-[11px] text-amber-700 mt-1">🔒 Đang có người xem</div>
                 {% endif %}
               </td>
               <td class="px-3 py-3 text-right font-mono font-semibold text-slate-800">
@@ -85,13 +85,13 @@
                         hx-target="#approval-detail-panel"
                         hx-swap="innerHTML"
                         class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900">
-                  Xem &amp; X? l?
+                  Xem &amp; Xử lý
                 </button>
               </td>
             </tr>
             {% else %}
             <tr>
-              <td colspan="4" class="px-4 py-8 text-center text-slate-400">Kh?ng c? h? s? ph? duy?t n?o ph? h?p b? l?c.</td>
+              <td colspan="4" class="px-4 py-8 text-center text-slate-400">Không có hồ sơ phê duyệt nào phù hợp bộ lọc.</td>
             </tr>
             {% endfor %}
           </tbody>

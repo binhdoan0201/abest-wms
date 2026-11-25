@@ -1,28 +1,28 @@
 <div class="space-y-4">
   {% if flash_msg %}
   <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800">
-    ? {{ flash_msg }}
+    ✓ {{ flash_msg }}
   </div>
   {% endif %}
 
   {% if api_error %}
   <div class="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-800">
-    ?? [{{ api_error.code }}] {{ api_error.message }}
+    ⚠ [{{ api_error.code }}] {{ api_error.message }}
   </div>
   {% endif %}
 
   <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
     <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-      <h2 class="font-semibold text-slate-800 text-sm">Danh s?ch nhi?m v? ({{ tasks|length }})</h2>
+      <h2 class="font-semibold text-slate-800 text-sm">Danh sách nhiệm vụ ({{ tasks|length }})</h2>
     </div>
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-slate-200 text-xs">
         <thead class="bg-slate-50 text-slate-600 uppercase">
           <tr>
-            <th class="px-3 py-2.5 text-left">Nhi?m v? / Kh?u</th>
-            <th class="px-3 py-2.5 text-left">?u ti?n &amp; Tr?ng th?i</th>
-            <th class="px-3 py-2.5 text-left">Ng??i th?c hi?n</th>
-            <th class="px-3 py-2.5 text-left">?i?u ph?i / Thao t?c</th>
+            <th class="px-3 py-2.5 text-left">Nhiệm vụ / Khâu</th>
+            <th class="px-3 py-2.5 text-left">Ưu tiên &amp; Trạng thái</th>
+            <th class="px-3 py-2.5 text-left">Người thực hiện</th>
+            <th class="px-3 py-2.5 text-left">Điều phối / Thao tác</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
@@ -30,7 +30,7 @@
           <tr class="hover:bg-slate-50 align-top">
             <td class="px-3 py-3">
               <div class="font-bold text-slate-800">{{ t.task_type }} <span class="text-slate-400 font-normal">(v{{ t.version_no }})</span></div>
-              <div class="text-indigo-700 font-medium">Kh?u: {{ t.stage }}</div>
+              <div class="text-indigo-700 font-medium">Khâu: {{ t.stage }}</div>
               <div class="text-slate-500 font-mono text-[11px]">{{ t.ref_doc_type }}: {{ t.ref_doc_id }}</div>
               <div class="text-slate-400 font-mono text-[10px]">Task: {{ t.task_id }}</div>
             </td>
@@ -46,11 +46,11 @@
                 </span>
               </div>
               {% if t.rejection_reason %}
-              <div class="text-rose-600 text-[11px]">L? do t? ch?i: {{ t.rejection_reason }}</div>
+              <div class="text-rose-600 text-[11px]">Lý do từ chối: {{ t.rejection_reason }}</div>
               {% endif %}
             </td>
             <td class="px-3 py-3 font-mono text-[11px] text-slate-700">
-              {{ t.assigned_to or 'Ch?a giao' }}
+              {{ t.assigned_to or 'Chưa giao' }}
             </td>
             <td class="px-3 py-3">
               {% if is_supervisor and t.status not in ['COMPLETED', 'CANCELLED'] %}
@@ -58,48 +58,48 @@
                 <input type="hidden" name="version_no" value="{{ t.version_no }}">
                 {% if workers %}
                 <select name="worker_user_id" class="rounded border border-slate-300 px-2 py-1 text-xs bg-white">
-                  <option value="">-- Ch?n nh?n vi?n --</option>
+                  <option value="">-- Chọn nhân viên --</option>
                   {% for w in workers %}
                   <option value="{{ w.user_id }}">{{ w.username }} ({{ w.role_code }})</option>
                   {% endfor %}
                 </select>
                 {% else %}
-                <input type="text" name="worker_user_id" placeholder="UUID nh?n vi?n" class="rounded border border-slate-300 px-2 py-1 text-xs font-mono w-40">
+                <input type="text" name="worker_user_id" placeholder="UUID nhân viên" class="rounded border border-slate-300 px-2 py-1 text-xs font-mono w-40">
                 {% endif %}
-                <input type="text" name="note_or_reason" placeholder="L? do ?i?u chuy?n/h?y" class="rounded border border-slate-300 px-2 py-1 text-xs w-36">
+                <input type="text" name="note_or_reason" placeholder="Lý do điều chuyển/hủy" class="rounded border border-slate-300 px-2 py-1 text-xs w-36">
                 {% if t.status in ['UNASSIGNED', 'REJECTED'] %}
                 <button type="submit" name="action" value="assign" class="rounded bg-indigo-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-indigo-700">
-                  Giao vi?c
+                  Giao việc
                 </button>
                 {% else %}
                 <button type="submit" name="action" value="reassign" class="rounded bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700">
-                  ?i?u chuy?n
+                  Điều chuyển
                 </button>
                 {% endif %}
                 <button type="submit" name="action" value="cancel" class="rounded bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-700">
-                  H?y
+                  Hủy
                 </button>
               </form>
               {% elif not is_supervisor and t.status in ['ASSIGNED', 'IN_PROGRESS'] %}
               <form hx-post="/tasks/{{ t.task_id }}/dispatch" hx-target="#tasks-board-panel" hx-swap="innerHTML" class="flex flex-wrap items-center gap-1.5">
                 <input type="hidden" name="version_no" value="{{ t.version_no }}">
                 {% if t.status == 'ASSIGNED' %}
-                <button type="submit" name="action" value="accept" class="rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white">Nh?n vi?c</button>
-                <input type="text" name="note_or_reason" placeholder="L? do t? ch?i" class="rounded border border-slate-300 px-2 py-1 text-xs w-32">
-                <button type="submit" name="action" value="reject" class="rounded bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white">T? ch?i</button>
+                <button type="submit" name="action" value="accept" class="rounded bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white">Nhận việc</button>
+                <input type="text" name="note_or_reason" placeholder="Lý do từ chối" class="rounded border border-slate-300 px-2 py-1 text-xs w-32">
+                <button type="submit" name="action" value="reject" class="rounded bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white">Từ chối</button>
                 {% elif t.status == 'IN_PROGRESS' %}
-                <input type="text" name="completed_qty" placeholder="SL ho?n t?t" class="rounded border border-slate-300 px-2 py-1 text-xs w-24">
-                <button type="submit" name="action" value="complete" class="rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white">Ho?n t?t</button>
+                <input type="text" name="completed_qty" placeholder="SL hoàn tất" class="rounded border border-slate-300 px-2 py-1 text-xs w-24">
+                <button type="submit" name="action" value="complete" class="rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white">Hoàn tất</button>
                 {% endif %}
               </form>
               {% else %}
-              <span class="text-slate-400">?</span>
+              <span class="text-slate-400">—</span>
               {% endif %}
             </td>
           </tr>
           {% else %}
           <tr>
-            <td colspan="4" class="px-4 py-8 text-center text-slate-400">Kh?ng c? nhi?m v? n?o.</td>
+            <td colspan="4" class="px-4 py-8 text-center text-slate-400">Không có nhiệm vụ nào.</td>
           </tr>
           {% endfor %}
         </tbody>

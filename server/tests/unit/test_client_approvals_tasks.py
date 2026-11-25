@@ -1,4 +1,4 @@
-"""Test Web Client cho ph?n h? Ph? duy?t (Approvals) v? Nhi?m v? (Tasks) ? Task D-08."""
+"""Test Web Client cho phân hệ Phê duyệt (Approvals) và Nhiệm vụ (Tasks) — Task D-08."""
 
 import uuid
 from collections.abc import Generator
@@ -41,7 +41,7 @@ def test_approvals_access_control(web: TestClient) -> None:
     thukho_cookie = _login(web, "thukho")
     resp_tk = web.get("/approvals", cookies={"abest_session": thukho_cookie})
     assert resp_tk.status_code == 200
-    assert "H?ng ch? Ph? duy?t Ch?nh l?ch" in resp_tk.text
+    assert "Hàng chờ Phê duyệt Chênh lệch" in resp_tk.text
 
     quanly_cookie = _login(web, "quanly")
     resp_ql = web.get(
@@ -49,7 +49,7 @@ def test_approvals_access_control(web: TestClient) -> None:
         cookies={"abest_session": quanly_cookie},
     )
     assert resp_ql.status_code == 200
-    assert "Danh s?ch h? s?" in resp_ql.text
+    assert "Danh sách hồ sơ" in resp_ql.text
 
     staff_cookie = _login(web, "nv_nhan")
     resp_nv = web.get("/approvals", cookies={"abest_session": staff_cookie})
@@ -80,7 +80,7 @@ def test_approvals_htmx_panel_and_decisions(
             {
                 "tier": "D1_THUKHO",
                 "action": "SUBMITTED",
-                "recommendation_or_reason": "Ch?nh l?ch ki?m k? k? A1",
+                "recommendation_or_reason": "Chênh lệch kiểm kê kệ A1",
                 "created_at": "2026-11-25T08:00:00Z",
             }
         ],
@@ -112,7 +112,7 @@ def test_approvals_htmx_panel_and_decisions(
     )
     assert panel.status_code == 200
     assert "CYCLE_COUNT_DIFF" in panel.text
-    assert "M? kh?a xem" in panel.text
+    assert "Mở khóa xem" in panel.text
 
     unlock = web.post(
         f"/approvals/{approval_id}/unlock",
@@ -120,14 +120,14 @@ def test_approvals_htmx_panel_and_decisions(
         cookies={"abest_session": quanly_cookie},
     )
     assert unlock.status_code == 200
-    assert "?? gi?i ph?ng kh?a xem h? s?." in unlock.text
+    assert "Đã giải phóng khóa xem hồ sơ." in unlock.text
 
     approve = web.post(
         f"/approvals/{approval_id}/decide",
         data={
             "action": "approve",
             "version_no": "2",
-            "reason_or_note": "?? ??i chi?u bi?n b?n",
+            "reason_or_note": "Đã đối chiếu biên bản",
             "reauth_method": "PASSWORD",
             "reauth_password": "Demo@123456",
         },
@@ -135,47 +135,47 @@ def test_approvals_htmx_panel_and_decisions(
         cookies={"abest_session": quanly_cookie},
     )
     assert approve.status_code == 200
-    assert "?? ph? duy?t h? s? th?nh c?ng." in approve.text
+    assert "Đã phê duyệt hồ sơ thành công." in approve.text
 
     reject = web.post(
         f"/approvals/{approval_id}/decide",
         data={
             "action": "reject",
             "version_no": "2",
-            "reason_or_note": "Ch?ng t? ch?a h?p l?",
+            "reason_or_note": "Chứng từ chưa hợp lệ",
         },
         headers={"HX-Request": "true", **ORIGIN},
         cookies={"abest_session": quanly_cookie},
     )
     assert reject.status_code == 200
-    assert "?? t? ch?i h? s? ph? duy?t." in reject.text
+    assert "Đã từ chối hồ sơ phê duyệt." in reject.text
 
     recount = web.post(
         f"/approvals/{approval_id}/decide",
         data={
             "action": "request_info",
             "version_no": "2",
-            "reason_or_note": "??m l?i l? h?ng B2",
+            "reason_or_note": "Đếm lại lô hàng B2",
             "request_recount": "true",
         },
         headers={"HX-Request": "true", **ORIGIN},
         cookies={"abest_session": quanly_cookie},
     )
     assert recount.status_code == 200
-    assert "?? g?i y?u c?u ??m l?i ki?m k?." in recount.text
+    assert "Đã gửi yêu cầu đếm lại kiểm kê." in recount.text
 
     escalate = web.post(
         f"/approvals/{approval_id}/decide",
         data={
             "action": "escalate",
             "version_no": "2",
-            "reason_or_note": "V??t h?n m?c Th? kho",
+            "reason_or_note": "Vượt hạn mức Thủ kho",
         },
         headers={"HX-Request": "true", **ORIGIN},
         cookies={"abest_session": quanly_cookie},
     )
     assert escalate.status_code == 200
-    assert "?? chuy?n h? s? l?n c?p ph? duy?t cao h?n." in escalate.text
+    assert "Đã chuyển hồ sơ lên cấp phê duyệt cao hơn." in escalate.text
 
     posted_paths = [c[1] for c in calls if c[0] == "POST"]
     assert f"/approvals/{approval_id}/unlock" in posted_paths
@@ -191,8 +191,8 @@ def test_tasks_access_and_supervisor_dispatch_htmx(
     thukho_cookie = _login(web, "thukho")
     resp_page = web.get("/tasks", cookies={"abest_session": thukho_cookie})
     assert resp_page.status_code == 200
-    assert "?i?u ph?i &amp; Qu?n l? Nhi?m v? Kho" in resp_page.text
-    assert "T?o nhi?m v? th? c?ng" in resp_page.text
+    assert "Điều phối &amp; Quản lý Nhiệm vụ Kho" in resp_page.text
+    assert "Tạo nhiệm vụ thủ công" in resp_page.text
 
     bgd_cookie = _login(web, "bgd")
     resp_bgd = web.get("/tasks", cookies={"abest_session": bgd_cookie})
@@ -258,7 +258,7 @@ def test_tasks_access_and_supervisor_dispatch_htmx(
         cookies={"abest_session": thukho_cookie},
     )
     assert created.status_code == 200
-    assert "?? t?o nhi?m v? m?i" in created.text
+    assert "Đã tạo nhiệm vụ mới" in created.text
 
     assigned = web.post(
         f"/tasks/{task_id}/dispatch",
@@ -267,7 +267,7 @@ def test_tasks_access_and_supervisor_dispatch_htmx(
         cookies={"abest_session": thukho_cookie},
     )
     assert assigned.status_code == 200
-    assert "?? giao nhi?m v? cho nh?n vi?n." in assigned.text
+    assert "Đã giao nhiệm vụ cho nhân viên." in assigned.text
 
     reassigned = web.post(
         f"/tasks/{task_id}/dispatch",
@@ -275,26 +275,26 @@ def test_tasks_access_and_supervisor_dispatch_htmx(
             "action": "reassign",
             "version_no": "2",
             "worker_user_id": worker_id,
-            "note_or_reason": "T?ng c??ng ca chi?u",
+            "note_or_reason": "Tăng cường ca chiều",
         },
         headers={"HX-Request": "true", **ORIGIN},
         cookies={"abest_session": thukho_cookie},
     )
     assert reassigned.status_code == 200
-    assert "?? ?i?u chuy?n nhi?m v? sang nh?n vi?n kh?c." in reassigned.text
+    assert "Đã điều chuyển nhiệm vụ sang nhân viên khác." in reassigned.text
 
     cancelled = web.post(
         f"/tasks/{task_id}/dispatch",
         data={
             "action": "cancel",
             "version_no": "3",
-            "note_or_reason": "??n h?ng t?m ho?n",
+            "note_or_reason": "Đơn hàng tạm hoãn",
         },
         headers={"HX-Request": "true", **ORIGIN},
         cookies={"abest_session": thukho_cookie},
     )
     assert cancelled.status_code == 200
-    assert "?? h?y nhi?m v?." in cancelled.text
+    assert "Đã hủy nhiệm vụ." in cancelled.text
 
     assert [p[0] for p in posted] == [
         "/tasks",
