@@ -214,12 +214,14 @@ class InboundRepository:
 
         new_id = uuid.uuid4()
         db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO lots (
                     lot_id, sku_id, lot_number, manufacture_date, expiry_date, supplier_id
                 )
                 VALUES (:lid, :sid, :lnum, :mdate, :edate, :sup);
-                """),
+                """
+            ),
             {
                 "lid": new_id,
                 "sid": sku_id,
@@ -234,7 +236,8 @@ class InboundRepository:
     @staticmethod
     def get_first_dock_location(db: Session, warehouse_id: uuid.UUID) -> uuid.UUID | None:
         return db.scalar(  # type: ignore[no-any-return]
-            text("""
+            text(
+                """
                 SELECT l.location_id
                 FROM locations l
                 JOIN zones z ON z.zone_id = l.zone_id
@@ -244,7 +247,8 @@ class InboundRepository:
                   AND z.is_active = TRUE
                 ORDER BY l.location_code ASC
                 LIMIT 1;
-                """),
+                """
+            ),
             {"wh": warehouse_id},
         )
 
@@ -260,14 +264,16 @@ class InboundRepository:
     ) -> uuid.UUID:
         pid = uuid.uuid4()
         db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO pallets (
                     pallet_id, pallet_code, warehouse_id, current_location_id,
                     source_grn_id, status, version_no, created_by
                 ) VALUES (
                     :pid, :pcode, :wh, :loc, :grn, CAST(:st AS pallet_status_type), 1, :cby
                 );
-                """),
+                """
+            ),
             {
                 "pid": pid,
                 "pcode": pallet_code,
@@ -289,25 +295,29 @@ class InboundRepository:
     ) -> int:
         if location_id is not None:
             ver = db.scalar(
-                text("""
+                text(
+                    """
                     UPDATE pallets
                     SET status = CAST(:st AS pallet_status_type),
                         current_location_id = :loc,
                         version_no = version_no + 1
                     WHERE pallet_id = :pid
                     RETURNING version_no;
-                    """),
+                    """
+                ),
                 {"pid": pallet_id, "st": status, "loc": location_id},
             )
         else:
             ver = db.scalar(
-                text("""
+                text(
+                    """
                     UPDATE pallets
                     SET status = CAST(:st AS pallet_status_type),
                         version_no = version_no + 1
                     WHERE pallet_id = :pid
                     RETURNING version_no;
-                    """),
+                    """
+                ),
                 {"pid": pallet_id, "st": status},
             )
         return int(ver or 1)
@@ -315,7 +325,8 @@ class InboundRepository:
     @staticmethod
     def get_open_approval_for_grn(db: Session, grn_id: uuid.UUID) -> tuple[uuid.UUID, str] | None:
         row = db.execute(
-            text("""
+            text(
+                """
                 SELECT approval_id, status::text
                 FROM approval_requests
                 WHERE object_type = 'GRN_DISCREPANCY'
@@ -323,7 +334,8 @@ class InboundRepository:
                   AND status IN ('PENDING_D1', 'PENDING_D2', 'PENDING_D3', 'NEED_INFO', 'EXPIRED')
                 ORDER BY created_at DESC
                 LIMIT 1;
-                """),
+                """
+            ),
             {"oid": grn_id},
         ).first()
         if not row:
@@ -333,11 +345,13 @@ class InboundRepository:
     @staticmethod
     def has_recount_request_history(db: Session, approval_id: uuid.UUID) -> bool:
         val = db.scalar(
-            text("""
+            text(
+                """
                 SELECT 1 FROM approval_histories
                 WHERE approval_id = :aid AND action = 'REQUEST_RECOUNT'
                 LIMIT 1;
-                """),
+                """
+            ),
             {"aid": approval_id},
         )
         return val is not None
@@ -345,12 +359,14 @@ class InboundRepository:
     @staticmethod
     def get_pallet_row(db: Session, pallet_id: uuid.UUID) -> dict[str, Any] | None:
         row = db.execute(
-            text("""
+            text(
+                """
                 SELECT pallet_id, pallet_code, warehouse_id, current_location_id,
                        source_grn_id, status::text, version_no
                 FROM pallets
                 WHERE pallet_id = :pid;
-                """),
+                """
+            ),
             {"pid": pallet_id},
         ).first()
         if not row:
@@ -368,13 +384,15 @@ class InboundRepository:
     @staticmethod
     def get_pallet_balances(db: Session, pallet_id: uuid.UUID) -> list[dict[str, Any]]:
         rows = db.execute(
-            text("""
+            text(
+                """
                 SELECT ib.balance_id, ib.location_id, ib.sku_id, ib.lot_id,
                        ib.serial_number, ib.qty_available, s.storage_requirement
                 FROM inventory_balances ib
                 JOIN skus s ON s.sku_id = ib.sku_id
                 WHERE ib.pallet_id = :pid AND ib.qty_available > 0;
-                """),
+                """
+            ),
             {"pid": pallet_id},
         ).fetchall()
         return [
@@ -399,7 +417,8 @@ class InboundRepository:
         sku_ids: list[uuid.UUID],
     ) -> list[dict[str, Any]]:
         rows = db.execute(
-            text("""
+            text(
+                """
                 SELECT l.location_id, l.location_code, l.barcode, l.zone_id,
                        z.zone_code, l.status::text, l.current_capacity_pct,
                        EXISTS (
@@ -418,7 +437,8 @@ class InboundRepository:
                   AND (:excl_loc IS NULL OR l.location_id <> :excl_loc)
                 ORDER BY has_same_sku DESC, l.current_capacity_pct DESC, l.location_code ASC
                 LIMIT 5;
-                """),
+                """
+            ),
             {
                 "wh": warehouse_id,
                 "ztype": zone_type,
@@ -445,7 +465,8 @@ class InboundRepository:
         db: Session, pallet_id: uuid.UUID, actor_id: uuid.UUID
     ) -> None:
         db.execute(
-            text("""
+            text(
+                """
                 UPDATE tasks
                 SET status = 'COMPLETED',
                     completed_at = NOW(),
@@ -457,6 +478,7 @@ class InboundRepository:
                   AND ref_doc_id = :pid
                   AND task_type = 'PUTAWAY'
                   AND status NOT IN ('COMPLETED', 'CANCELLED');
-                """),
+                """
+            ),
             {"pid": pallet_id, "actor": actor_id},
         )

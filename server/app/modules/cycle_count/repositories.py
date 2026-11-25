@@ -78,12 +78,14 @@ class CycleCountRepository:
         db: Session, warehouse_id: uuid.UUID, location_id: uuid.UUID, user_id: uuid.UUID
     ) -> list[dict[str, Any]]:
         loc_row = db.execute(
-            text("""
+            text(
+                """
                 SELECT location_id, status::text
                 FROM locations
                 WHERE location_id = :loc AND warehouse_id = :wh
                 FOR UPDATE;
-                """),
+                """
+            ),
             {"loc": location_id, "wh": warehouse_id},
         ).first()
         if not loc_row:
@@ -92,25 +94,29 @@ class CycleCountRepository:
             return [{"error": "MAINTENANCE_LOCKED"}]
 
         db.execute(
-            text("""
+            text(
+                """
                 UPDATE locations
                 SET status = 'COUNTING_LOCKED',
                     lock_reason = 'Khóa phục vụ kiểm kê',
                     locked_by = :uid,
                     locked_at = NOW()
                 WHERE location_id = :loc;
-                """),
+                """
+            ),
             {"loc": location_id, "uid": user_id},
         )
 
         bals = db.execute(
-            text("""
+            text(
+                """
                 SELECT sku_id, lot_id, pallet_id,
                        (qty_available + qty_allocated + qty_locked) AS sys_qty
                 FROM inventory_balances
                 WHERE warehouse_id = :wh AND location_id = :loc
                   AND (qty_available + qty_allocated + qty_locked) > 0;
-                """),
+                """
+            ),
             {"wh": warehouse_id, "loc": location_id},
         ).fetchall()
 
@@ -127,7 +133,8 @@ class CycleCountRepository:
     @staticmethod
     def unlock_sheet_locations(db: Session, sheet_id: uuid.UUID) -> None:
         locs = db.scalars(
-            text("""
+            text(
+                """
                 SELECT DISTINCT ccl.location_id
                 FROM cycle_count_lines ccl
                 JOIN locations l ON l.location_id = ccl.location_id
@@ -139,16 +146,19 @@ class CycleCountRepository:
                         AND o.count_sheet_id <> :sid
                         AND o.status NOT IN ('AUTO_APPROVED_Z', 'ADJUSTED', 'REJECTED', 'APPROVED')
                   );
-                """),
+                """
+            ),
             {"sid": sheet_id},
         ).all()
         for loc_id in locs:
             db.execute(
-                text("""
+                text(
+                    """
                     UPDATE locations
                     SET status = 'PARTIAL', lock_reason = NULL, locked_by = NULL, locked_at = NULL
                     WHERE location_id = :loc;
-                    """),
+                    """
+                ),
                 {"loc": loc_id},
             )
             db.execute(text("SELECT fn_refresh_location_status(:loc);"), {"loc": loc_id})

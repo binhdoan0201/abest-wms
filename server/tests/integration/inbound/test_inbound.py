@@ -44,19 +44,23 @@ def test_inbound_full_flow_receive_submit_complete_putaway() -> None:
     db = SessionLocal()
     try:
         db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO purchase_orders (
                     po_id, erp_po_number, warehouse_id, supplier_id, status, expected_date
                 )
                 VALUES (:pid, :erp, :wh, :sup, 'PENDING', CURRENT_DATE);
-                """),
+                """
+            ),
             {"pid": po_id, "erp": erp_po, "wh": WAREHOUSE_ID, "sup": SUPPLIER_ID},
         )
         db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO po_lines (po_line_id, po_id, line_number, sku_id, uom_code, qty_ordered)
                 VALUES (:lid, :pid, 1, :sku, 'PCS', 10.000);
-                """),
+                """
+            ),
             {"lid": po_line_id, "pid": po_id, "sku": SKU_ID},
         )
         db.commit()
