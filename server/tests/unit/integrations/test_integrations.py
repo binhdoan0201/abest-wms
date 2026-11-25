@@ -1,4 +1,9 @@
-"""Unit tests cho hàm công khai của integrations: enqueue_to_erp, request_waybill, get_waybill."""
+"""Unit tests cho hàm công khai của integrations: enqueue_to_erp, request_waybill, get_waybill.
+
+Test không giả định hàng đợi trống: module khác có thể để lại dòng chờ. Vì vậy chỉ thử lại đúng
+dòng của mình (`retry_log`), hoặc cấu hình đủ lỗi giả lập và bỏ giới hạn số dòng khi cần chạy
+`process_pending`. Mọi thay đổi rollback cuối test.
+"""
 
 import uuid
 
@@ -15,6 +20,9 @@ from server.app.modules.integrations import (
     request_waybill,
 )
 from server.app.modules.integrations.services import MAX_RETRIES
+
+# Đủ lớn để không bị dòng chờ của module khác dùng hết lỗi giả lập hoặc chiếm chỗ trong lô.
+PLENTY = 100_000
 
 
 def _warehouse_id(db: object) -> uuid.UUID:
@@ -50,7 +58,14 @@ def test_waybill_success_and_retry_after_tms_failure() -> None:
         assert request_waybill(db, warehouse_id, gi_wait, {"gi_id": str(gi_wait)}) is None
         assert get_waybill(db, gi_wait) is None
 
-        IntegrationService.process_pending(db, _quanly(warehouse_id))
+        waybill_log = db.execute(
+            text(
+                "SELECT sync_id FROM integration_sync_logs "
+                "WHERE external_system = 'TMS' AND doc_id = :g"
+            ),
+            {"g": gi_wait},
+        ).scalar_one()
+        IntegrationService.retry_log(db, _quanly(warehouse_id), str(waybill_log))
         assert get_waybill(db, gi_wait) is not None
     finally:
         db.rollback()
@@ -62,11 +77,12 @@ def test_enqueue_to_erp_stops_retrying_after_max() -> None:
     try:
         warehouse_id = _warehouse_id(db)
         user = _quanly(warehouse_id)
-        get_erp_gateway().configure_failures("TECHNICAL_ERROR", MAX_RETRIES + 5)
+        get_erp_gateway().configure_failures("TECHNICAL_ERROR", PLENTY)
         sync_id = enqueue_to_erp(db, warehouse_id, "GRN", uuid.uuid4(), {"grn": "test"})
 
+        # process_pending phải tự dừng thử lại dòng này khi đủ MAX_RETRIES lần.
         for _ in range(MAX_RETRIES + 2):
-            IntegrationService.process_pending(db, user)
+            IntegrationService.process_pending(db, user, limit=PLENTY)
         retry_count, status = db.execute(
             text("SELECT retry_count, status FROM integration_sync_logs WHERE sync_id = :s"),
             {"s": sync_id},
@@ -76,7 +92,7 @@ def test_enqueue_to_erp_stops_retrying_after_max() -> None:
 
         get_erp_gateway().configure_failures("BUSINESS_ERROR", 1)
         other = enqueue_to_erp(db, warehouse_id, "GI", uuid.uuid4(), {"gi": "test"})
-        IntegrationService.process_pending(db, user)
+        IntegrationService.retry_log(db, user, str(other))
         status = db.execute(
             text("SELECT status FROM integration_sync_logs WHERE sync_id = :s"), {"s": other}
         ).scalar_one()
