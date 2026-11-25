@@ -138,3 +138,47 @@ class MasterDataRepository:
             ),
             {"w": warehouse_id},
         )
+
+    @staticmethod
+    def list_users(
+        db: Session,
+        warehouse_id: uuid.UUID | None,
+        role_code: str | None,
+        status: str | None,
+        q: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Danh sách người dùng kèm vai trò (bảng `users`, `roles` thuộc module này theo 4.2)."""
+        where = ["1 = 1"]
+        params: dict[str, Any] = {"limit": page_size, "offset": (page - 1) * page_size}
+        if warehouse_id is not None:
+            where.append("u.primary_warehouse_id = :wh")
+            params["wh"] = warehouse_id
+        if role_code is not None:
+            where.append("r.role_code = :role")
+            params["role"] = role_code
+        if status is not None:
+            where.append("u.status::text = :status")
+            params["status"] = status
+        if q:
+            where.append("(u.username ILIKE :q OR u.full_name ILIKE :q)")
+            params["q"] = f"%{q}%"
+        where_sql = " AND ".join(where)
+        base = f"FROM users u JOIN roles r ON r.role_id = u.primary_role_id WHERE {where_sql}"
+        total = db.execute(text(f"SELECT COUNT(*) {base}"), params).scalar_one()
+        rows = db.execute(
+            text(
+                f"""
+                SELECT u.user_id, u.username, u.full_name, u.email, u.phone,
+                       r.role_code, r.role_name, u.primary_stage::text AS primary_stage,
+                       u.primary_warehouse_id, u.status::text AS status, u.is_seasonal,
+                       u.valid_until, u.is_safety_checked, u.last_login_at
+                {base}
+                ORDER BY r.role_code, u.username
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            params,
+        ).mappings()
+        return [dict(r) for r in rows], int(total)

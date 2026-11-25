@@ -1,0 +1,107 @@
+{% extends "_base/layout.html" %}
+{% block title %}Hàng chờ Phê duyệt - ABEST WMS{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-800">Hàng chờ Phê duyệt Chênh lệch</h1>
+      <p class="text-sm text-slate-500">Xử lý hồ sơ phê duyệt đa cấp D1 (Thủ kho) / D2 (Quản lý): duyệt xác thực lại, từ chối hoặc yêu cầu đếm lại</p>
+    </div>
+    <form method="get" action="/approvals" class="flex flex-wrap items-center gap-2">
+      <select name="status" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+        <option value="" {% if not filters.status %}selected{% endif %}>Tất cả trạng thái</option>
+        <option value="PENDING_D1" {% if filters.status == 'PENDING_D1' %}selected{% endif %}>PENDING_D1 (Chờ Thủ kho)</option>
+        <option value="PENDING_D2" {% if filters.status == 'PENDING_D2' %}selected{% endif %}>PENDING_D2 (Chờ Quản lý)</option>
+        <option value="PENDING_D3" {% if filters.status == 'PENDING_D3' %}selected{% endif %}>PENDING_D3 (Chờ BGĐ)</option>
+        <option value="NEED_INFO" {% if filters.status == 'NEED_INFO' %}selected{% endif %}>NEED_INFO (Cần bổ sung)</option>
+        <option value="APPROVED" {% if filters.status == 'APPROVED' %}selected{% endif %}>APPROVED (Đã duyệt)</option>
+        <option value="REJECTED" {% if filters.status == 'REJECTED' %}selected{% endif %}>REJECTED (Từ chối)</option>
+        <option value="EXPIRED" {% if filters.status == 'EXPIRED' %}selected{% endif %}>EXPIRED (Quá hạn)</option>
+      </select>
+      <select name="tier" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+        <option value="" {% if not filters.tier %}selected{% endif %}>Tất cả cấp</option>
+        <option value="D1" {% if filters.tier == 'D1' %}selected{% endif %}>Cấp D1 (Thủ kho)</option>
+        <option value="D2" {% if filters.tier == 'D2' %}selected{% endif %}>Cấp D2 (Quản lý)</option>
+        <option value="D3" {% if filters.tier == 'D3' %}selected{% endif %}>Cấp D3 (BGĐ)</option>
+      </select>
+      <select name="object_type" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+        <option value="" {% if not filters.object_type %}selected{% endif %}>Mọi loại chứng từ</option>
+        <option value="GRN_DISCREPANCY" {% if filters.object_type == 'GRN_DISCREPANCY' %}selected{% endif %}>Chênh lệch GRN</option>
+        <option value="CYCLE_COUNT_DIFF" {% if filters.object_type == 'CYCLE_COUNT_DIFF' %}selected{% endif %}>Chênh lệch Kiểm kê</option>
+        <option value="STOCK_ADJUSTMENT" {% if filters.object_type == 'STOCK_ADJUSTMENT' %}selected{% endif %}>Điều chỉnh tồn</option>
+        <option value="STOCK_SCRAP" {% if filters.object_type == 'STOCK_SCRAP' %}selected{% endif %}>Hủy hàng hỏng</option>
+        <option value="OVERTIME_REQUEST" {% if filters.object_type == 'OVERTIME_REQUEST' %}selected{% endif %}>Đề xuất tăng ca</option>
+      </select>
+      <label class="inline-flex items-center gap-1.5 text-sm text-slate-700 px-2">
+        <input type="checkbox" name="expired" value="true" {% if filters.expired == 'true' %}checked{% endif %} class="rounded border-slate-300">
+        <span>Quá hạn SLA</span>
+      </label>
+      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Lọc hồ sơ</button>
+    </form>
+  </div>
+
+  {% if api_error %}
+  <div class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+    <strong>Lỗi ({{ api_error.code }}):</strong> {{ api_error.message }}
+  </div>
+  {% endif %}
+
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div class="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+        <h2 class="font-semibold text-slate-800 text-sm">Danh sách hồ sơ ({{ meta.total if meta and meta.total is not none else items|length }})</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+          <thead class="bg-slate-50 text-slate-600 text-xs uppercase">
+            <tr>
+              <th class="px-3 py-2.5 text-left">Loại / Mã đối tượng</th>
+              <th class="px-3 py-2.5 text-left">Cấp / Trạng thái</th>
+              <th class="px-3 py-2.5 text-right">Giá trị lệch</th>
+              <th class="px-3 py-2.5 text-right">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% for item in items %}
+            <tr class="hover:bg-slate-50">
+              <td class="px-3 py-3">
+                <div class="font-semibold text-slate-800">{{ item.object_type }}</div>
+                <div class="text-xs text-slate-500 font-mono">{{ item.object_id }}</div>
+                <div class="text-[11px] text-slate-400">v{{ item.version_no }} &bull; SLA: {{ item.sla_due_at or 'N/A' }}</div>
+              </td>
+              <td class="px-3 py-3">
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-800">{{ item.current_tier }}</span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold {% if item.status == 'APPROVED' %}bg-emerald-100 text-emerald-800{% elif item.status == 'REJECTED' %}bg-rose-100 text-rose-800{% elif item.status == 'NEED_INFO' %}bg-amber-100 text-amber-800{% else %}bg-blue-100 text-blue-800{% endif %}">{{ item.status }}</span>
+                {% if item.locked_by_viewer_id %}
+                <div class="text-[11px] text-amber-700 mt-1">🔒 Đang có người xem</div>
+                {% endif %}
+              </td>
+              <td class="px-3 py-3 text-right font-mono font-semibold text-slate-800">
+                {{ item.discrepancy_value_amount }}
+              </td>
+              <td class="px-3 py-3 text-right">
+                <button type="button"
+                        hx-get="/approvals/{{ item.approval_id }}/panel?lock=true"
+                        hx-target="#approval-detail-panel"
+                        hx-swap="innerHTML"
+                        class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900">
+                  Xem &amp; Xử lý
+                </button>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="4" class="px-4 py-8 text-center text-slate-400">Không có hồ sơ phê duyệt nào phù hợp bộ lọc.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="approval-detail-panel" class="lg:col-span-5">
+      {% include "approvals/_detail_panel.html" %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -72,3 +72,22 @@
 - **Vai trò:** `quanly`.
 - **Phản hồi 200:** `{"data": {"escalated_count": 5}}`.
 - **Lỗi:** FORBIDDEN 403.
+
+
+---
+
+## Hàm công khai liên module (Quy tắc 2.3)
+
+Import từ `server.app.modules.approvals`:
+
+1. `create_approval_request(db, warehouse_id, object_type, object_id, proposer_user_id, discrepancy_amount, discrepancy_percent=0, force_review=False) -> ApprovalRequest | None`: Khởi tạo hồ sơ duyệt hoặc trả `None` nếu nằm trong dung sai Z (`AUTO_TOLERANCE_Z`).
+2. `resubmit_approval_info(db, approval_id, warehouse_id, actor_user_id, note, new_discrepancy_amount=None, new_discrepancy_percent=0) -> ApprovalRequest`: Mở lại hồ sơ từ `NEED_INFO` sang `PENDING_D*`.
+3. `supersede_approval_for_recount(db, approval_id, warehouse_id, actor_user_id, note=...) -> ApprovalRequest`: Đóng hồ sơ `NEED_INFO` sang `SUPERSEDED` khi thực hiện đếm lại.
+4. `update_approval_execution_status(db, approval_id, warehouse_id, actor_user_id, execution_status="EXECUTED_INVENTORY", note=None) -> ApprovalRequest`: Cập nhật `execution_status` sau khi phân hệ nguồn thực thi hậu kiểm (`WAITING_EXECUTION` -> `EXECUTED_INVENTORY`, hoặc cập nhật trạng thái đồng bộ ERP `SYNCED_ERP` / `FAILED_SYNC`).
+5. `mark_object_approval_executed(db, warehouse_id, object_type, object_id, actor_user_id, execution_status="EXECUTED_INVENTORY", note=None) -> ApprovalRequest | None`: Cập nhật `execution_status` theo đối tượng nguồn (`GRN_DISCREPANCY`, `CYCLE_COUNT_DIFF`); trả `None` nếu đối tượng tự động duyệt qua dung sai Z nên không phát sinh bản ghi `approval_requests`.
+
+### Chốt trách nhiệm ghi tồn hậu kiểm (Issue #24)
+
+- **`STOCK_ADJUSTMENT`:** Do `approvals` tự gọi `apply_movement` và đẩy hàng đợi ERP ngay trong `POST /api/v1/approvals/{approval_id}/approve` (`execution_status = EXECUTED_INVENTORY`).
+- **`GRN_DISCREPANCY`:** Khi duyệt xong, `approvals` đặt `execution_status = WAITING_EXECUTION`. Phân hệ `inbound` thực thi ghi tồn trong `POST /grns/{id}/complete` rồi gọi `mark_object_approval_executed(..., "GRN_DISCREPANCY", grn_id, ...)` để chuyển sang `EXECUTED_INVENTORY`.
+- **`CYCLE_COUNT_DIFF`:** Khi duyệt xong, `approvals` đặt `execution_status = WAITING_EXECUTION`. Phân hệ `cycle_count` thực thi ghi tồn điều chỉnh kiểm kê (`apply_movement` với `tx_type="CYCLE_COUNT"`) rồi gọi `mark_object_approval_executed(..., "CYCLE_COUNT_DIFF", count_id, ...)` để chuyển sang `EXECUTED_INVENTORY`.

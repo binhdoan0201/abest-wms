@@ -77,7 +77,7 @@ Mẫu chung cho mỗi tài nguyên: `GET /{tài-nguyên}`, `GET /{tài-nguyên}/
 | Tài nguyên | Đọc | Ghi |
 | --- | --- | --- |
 | `warehouses`, `zones`, `locations`, `item-categories`, `skus`, `sku-barcodes`, `suppliers`, `customers`, `reason-codes`, `box-types` | mọi vai trò (trừ `admin` với dữ liệu nghiệp vụ không liên quan) | `admin` |
-| `users`, `roles` | `admin` | `admin` |
+| `users`, `roles` | `admin`; riêng `GET /users` thêm `thukho`, `quanly` (TK-1.1, chỉ kho mình, không có email, SĐT) để giao task | `admin` |
 
 ### 4.3 `inventory` (A)
 
