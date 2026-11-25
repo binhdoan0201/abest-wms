@@ -1,7 +1,7 @@
 """ABEST WMS - Routers cho Phân hệ Nhập kho (Inbound).
 
-Khai báo toàn bộ endpoint theo Mục 4.5 Chuẩn API:
-Mọi endpoint trả về HTTP 501 Not Implemented kèm kiểm tra quyền RBAC.
+Khai báo toàn bộ endpoint theo Mục 4.5 Chuẩn API.
+B-03 (PO, ASN đọc) đã cài đặt; các endpoint còn lại trả HTTP 501 kèm kiểm tra quyền RBAC.
 """
 
 import uuid
@@ -12,27 +12,33 @@ from fastapi import APIRouter, Depends
 from server.app.core.database import DbSession, get_db
 from server.app.core.exceptions import BusinessError
 from server.app.core.rbac import UserContext, get_current_user, require_permission
+from server.app.core.responses import success_response
 from server.app.modules.inbound.schemas import (
     CreateGrnRequest,
     GrnLineCountRequest,
     PutawayConfirmRequest,
     PutawaySuggestRequest,
 )
+from server.app.modules.inbound.services import InboundService
 
 router = APIRouter(tags=["Inbound"])
 
 
 @router.get("/purchase-orders", summary="Xem danh sách đơn mua hàng (PO)")
 def get_purchase_orders(
+    status: str | None = None,
+    supplier_id: uuid.UUID | None = None,
+    sort: str = "-created_at",
+    page: int = 1,
+    page_size: int = 20,
     user_ctx: UserContext = Depends(get_current_user),
     _perm: str = Depends(require_permission("NH-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint GET /purchase-orders đang phát triển (TODO: Chủ module B)",
-        http_status=501,
+    items, total, page, page_size = InboundService.list_purchase_orders(
+        db, user_ctx, status, supplier_id, sort, page, page_size
     )
+    return success_response(data=items, page=page, page_size=page_size, total=total)
 
 
 @router.get("/purchase-orders/{po_id}", summary="Xem chi tiết đơn mua hàng (PO)")
@@ -42,24 +48,24 @@ def get_purchase_order_by_id(
     _perm: str = Depends(require_permission("NH-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint GET /purchase-orders/{id} đang phát triển (TODO: Chủ module B)",
-        http_status=501,
-    )
+    return success_response(data=InboundService.get_purchase_order(db, user_ctx, po_id))
 
 
 @router.get("/asns", summary="Xem danh sách thông báo giao hàng trước (ASN)")
 def get_asns(
+    status: str | None = None,
+    po_id: uuid.UUID | None = None,
+    sort: str = "-created_at",
+    page: int = 1,
+    page_size: int = 20,
     user_ctx: UserContext = Depends(get_current_user),
     _perm: str = Depends(require_permission("NH-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint GET /asns đang phát triển (TODO: Chủ module B)",
-        http_status=501,
+    items, total, page, page_size = InboundService.list_asns(
+        db, user_ctx, status, po_id, sort, page, page_size
     )
+    return success_response(data=items, page=page, page_size=page_size, total=total)
 
 
 @router.post("/grns", summary="Tạo phiếu nhập kho GRN từ PO hoặc ASN")
