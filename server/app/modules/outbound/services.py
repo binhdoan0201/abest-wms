@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from server.app.core.audit import create_audit_log
 from server.app.core.exceptions import BusinessError, translate_db_error
 from server.app.core.rbac import UserContext, enforce_warehouse_scope
+from server.app.modules.integrations import enqueue_to_erp, get_waybill, request_waybill
 from server.app.modules.inventory import apply_movement, transfer_inventory
 from server.app.modules.outbound.repositories import (
     OutboundRepository,
@@ -1153,15 +1154,31 @@ class OutboundService:
         order_type = str(order["order_type"])
         gi_type = "SO_SHIPMENT" if order_type == "SO" else order_type
 
+        warehouse_id = uuid.UUID(str(order["warehouse_id"]))
+        order_status = str(order["status"])
         try:
             gi = OutboundRepository.create_goods_issue_and_link_packages(
                 db=db,
-                warehouse_id=uuid.UUID(str(order["warehouse_id"])),
+                warehouse_id=warehouse_id,
                 order_id=req.order_id,
                 gi_type=gi_type,
                 vehicle_id=req.vehicle_id,
                 tms_waybill_code=req.tms_waybill_code,
             )
+            if not req.tms_waybill_code:
+                wb = request_waybill(
+                    db=db,
+                    warehouse_id=warehouse_id,
+                    gi_id=uuid.UUID(str(gi["gi_id"])),
+                    payload={"gi_number": gi["gi_number"], "order_id": str(req.order_id)},
+                )
+                gi = OutboundRepository.update_gi_waybill_and_order_status(
+                    db=db,
+                    gi_id=uuid.UUID(str(gi["gi_id"])),
+                    order_id=req.order_id,
+                    waybill_code=wb,
+                )
+                order_status = "READY_TO_SHIP" if wb else "WAITING_WAYBILL"
 
             create_audit_log(
                 db=db,
@@ -1189,6 +1206,7 @@ class OutboundService:
             "tms_waybill_code": gi["tms_waybill_code"],
             "total_packages": int(gi["total_packages"]),
             "status": gi["status"],
+            "order_status": order_status,
             "version_no": int(gi["version_no"]),
         }
 
@@ -1240,6 +1258,21 @@ class OutboundService:
                 http_status=409,
             )
 
+        waybill_code = gi.get("tms_waybill_code") or get_waybill(db, gi_id)
+        if waybill_code and not gi.get("tms_waybill_code"):
+            gi = OutboundRepository.update_gi_waybill_and_order_status(
+                db=db,
+                gi_id=gi_id,
+                order_id=uuid.UUID(str(gi["order_id"])),
+                waybill_code=waybill_code,
+            )
+        if gi["gi_type"] in ("SO_SHIPMENT", "INTER_WH_TRANSFER") and not waybill_code:
+            raise BusinessError(
+                code="OUTBOUND_WAYBILL_REQUIRED",
+                message="Bắt buộc có mã vận đơn TMS trước khi xác nhận xuất kho",
+                http_status=409,
+            )
+
         warehouse_id = uuid.UUID(str(gi["warehouse_id"]))
         order_id = uuid.UUID(str(gi["order_id"]))
         shippable_items = OutboundRepository.get_shippable_staging_items(db, order_id)
@@ -1265,6 +1298,16 @@ class OutboundService:
                     performed_by=user_ctx.user_id,
                 )
 
+            wb = gi.get("tms_waybill_code")
+            if not wb and gi["gi_type"] == "SO_SHIPMENT":
+                wb = get_waybill(db, gi_id) or request_waybill(
+                    db=db,
+                    warehouse_id=warehouse_id,
+                    gi_id=gi_id,
+                    payload={"gi_number": gi["gi_number"], "order_id": str(order_id)},
+                )
+                if wb:
+                    OutboundRepository.update_gi_waybill_and_order_status(db, gi_id, order_id, wb)
             final_gi = OutboundRepository.finalize_goods_issue_and_order(
                 db=db,
                 gi_id=gi_id,
@@ -1272,6 +1315,18 @@ class OutboundService:
                 confirmed_by=user_ctx.user_id,
                 driver_signature_data=req.driver_signature_data,
                 handover_photo_urls=req.handover_photo_urls,
+            )
+            erp_sync_id = enqueue_to_erp(
+                db=db,
+                warehouse_id=warehouse_id,
+                doc_type="GI",
+                doc_id=gi_id,
+                payload={
+                    "gi_id": str(gi_id),
+                    "gi_number": final_gi["gi_number"],
+                    "order_id": str(order_id),
+                    "tms_waybill_code": wb,
+                },
             )
 
             create_audit_log(
@@ -1297,6 +1352,8 @@ class OutboundService:
             "order_id": str(order_id),
             "status": final_gi["status"],
             "order_status": "SHIPPED",
+            "tms_waybill_code": wb,
+            "erp_sync_id": str(erp_sync_id),
             "total_packages": int(final_gi["total_packages"]),
             "confirmed_by": str(final_gi["confirmed_by"]),
             "confirmed_at": _fmt_dt(final_gi["confirmed_at"]),
