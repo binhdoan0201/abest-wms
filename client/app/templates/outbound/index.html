@@ -1,0 +1,39 @@
+{% extends "_base/layout.html" %}
+{% block title %}Quản lý Xuất kho (Outbound) - ABEST WMS{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-800">Phân hệ Xuất kho (Outbound)</h1>
+      <p class="text-sm text-slate-500">Điều phối cấp phát FEFO/FIFO, soạn hàng, đóng gói kiện và phát hành phiếu xuất GI</p>
+    </div>
+    <div class="flex gap-2">{% if "SO-1" in perms %}<a href="/outbound/picking" class="rounded-lg border px-3 py-2 text-sm">NV Soạn</a>{% endif %}{% if "DG-1" in perms %}<a href="/outbound/packing" class="rounded-lg border px-3 py-2 text-sm">NV Đóng gói</a>{% endif %}</div>
+    {% if "QL-2.1" in perms %}
+    <form method="get" action="/outbound" class="flex items-center gap-2">
+      <select name="status" class="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+        <option value="" {% if not selected_status %}selected{% endif %}>Tất cả trạng thái</option>
+        <option value="NEW" {% if selected_status == 'NEW' %}selected{% endif %}>NEW</option>
+        <option value="PICKING" {% if selected_status == 'PICKING' %}selected{% endif %}>PICKING</option>
+        <option value="PICKED" {% if selected_status == 'PICKED' %}selected{% endif %}>PICKED</option>
+        <option value="PACKING" {% if selected_status == 'PACKING' %}selected{% endif %}>PACKING</option>
+        <option value="READY_TO_SHIP" {% if selected_status == 'READY_TO_SHIP' %}selected{% endif %}>READY_TO_SHIP</option>
+        <option value="SHIPPED" {% if selected_status == 'SHIPPED' %}selected{% endif %}>SHIPPED</option>
+      </select>
+      <button type="submit" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Lọc đơn</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if "QL-2.1" in perms %}
+  <div id="outbound-orders-container">{% include "outbound/_orders_table.html" %}</div>
+  {% endif %}
+
+  {% if "SO-1" in perms %}
+  <div id="outbound-pick-container">{% include "outbound/_pick_panel.html" %}</div>
+  {% endif %}
+
+  {% if "DG-1" in perms %}
+  <div id="outbound-pack-container">{% include "outbound/_pack_ship_panel.html" %}</div>
+  {% endif %}
+</div>
+{% endblock %}
