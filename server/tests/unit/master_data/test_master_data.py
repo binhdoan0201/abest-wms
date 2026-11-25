@@ -91,3 +91,24 @@ def test_convert_to_base_uom_uses_barcode_factor() -> None:
         assert exc.value.code == "NOT_FOUND"
     finally:
         db.close()
+
+
+def test_can_receive_tasks_rules_for_seasonal_staff() -> None:
+    """Thời vụ chỉ nhận task khi đã kiểm an toàn và còn hạn (NV-DC-1); người nghỉ thì không."""
+    from datetime import datetime, timedelta, timezone
+
+    from server.app.modules.master_data.services import _can_receive_tasks
+
+    now = datetime.now(timezone.utc)
+    base = {
+        "status": "ACTIVE",
+        "is_seasonal": False,
+        "is_safety_checked": True,
+        "valid_until": None,
+    }
+    assert _can_receive_tasks(base, now) is True
+    assert _can_receive_tasks({**base, "status": "LOCKED"}, now) is False
+    seasonal = {**base, "is_seasonal": True, "valid_until": now + timedelta(days=3)}
+    assert _can_receive_tasks(seasonal, now) is True
+    assert _can_receive_tasks({**seasonal, "is_safety_checked": False}, now) is False
+    assert _can_receive_tasks({**seasonal, "valid_until": now - timedelta(hours=1)}, now) is False
