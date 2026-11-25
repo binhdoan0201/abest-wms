@@ -189,7 +189,7 @@ def test_grn_discrepancy_approval_marks_executed_on_complete() -> None:
         wh_id = db.execute(text("SELECT warehouse_id FROM warehouses LIMIT 1;")).scalar()
         sup_id = db.execute(text("SELECT supplier_id FROM suppliers LIMIT 1;")).scalar()
         sku_row = db.execute(
-            text("SELECT sku_id, base_uom_id FROM skus WHERE is_active = TRUE LIMIT 1;")
+            text("SELECT sku_id, base_uom FROM skus WHERE is_active = TRUE LIMIT 1;")
         ).first()
         assert wh_id and sup_id and sku_row
         sku_id, uom_id = sku_row[0], sku_row[1]
