@@ -18,7 +18,7 @@ def test_inbound_grn_endpoint_returns_501_not_implemented() -> None:
     token = login_resp.json()["data"]["access_token"]
 
     resp = client.get(
-        "/api/v1/purchase-orders",
+        "/api/v1/grns",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 501
