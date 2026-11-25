@@ -22,7 +22,7 @@
 - **Mã định danh không đổi**: các cột mã (`*_code`, `barcode` của SKU) chỉ đặt khi tạo, không sửa qua `PATCH`.
 - **Khóa lạc quan**: các bảng danh mục không có cột `version_no`, nên không có `409 VERSION_CONFLICT`; lần ghi sau thắng.
 - **Audit**: mọi thao tác ghi đều ghi `audit_logs` với `action_code` là `MASTER_DATA_CREATE`, `MASTER_DATA_UPDATE`, `MASTER_DATA_DEACTIVATE`, `WAREHOUSE_CONFIG_UPDATE`.
-- **`users`, `roles`**: thuộc module này (chuẩn API 4.2) nhưng làm ở giai đoạn sau cùng màn hình Admin (A-11). Hiện các endpoint của hai tài nguyên này trả `501 NOT_IMPLEMENTED`.
+- **`users`, `roles`**: thuộc module này (chuẩn API 4.2). Đã có `GET /users` chỉ đọc (mục 8) để thủ kho, quản lý giao task. Các endpoint ghi của `users` và mọi endpoint `roles` làm cùng màn hình Admin (A-11), hiện trả `501 NOT_IMPLEMENTED`.
 
 ### Danh sách: phân trang, sắp xếp, tìm kiếm, lọc
 
@@ -151,6 +151,32 @@ POST /api/v1/skus
 - **Lỗi:** NOT_FOUND 404, FORBIDDEN 403, VALIDATION_ERROR 422, MASTER_DATA_INVALID_THRESHOLD 422 (sau khi sửa mà `threshold_x_d1_amount > threshold_y_d2_amount`).
 
 ---
+
+### 8. GET /api/v1/users
+
+Danh sách người dùng, chỉ đọc. Dùng cho màn hình giao task (D-08) và màn hình Admin (A-11).
+
+| Vai trò (quyền) | Phạm vi | Trường trả về |
+|---|---|---|
+| `admin` (`AD-1`) | Mọi kho; lọc `warehouse_id` tùy chọn; mọi trạng thái | Đủ, gồm `email`, `phone`, `last_login_at` |
+| `thukho`, `quanly` (`TK-1.1`) | Chỉ kho của mình (bỏ qua `warehouse_id` gửi lên); mặc định `status=ACTIVE` | Không có `email`, `phone`, `last_login_at` |
+
+Nhân viên và `bgd` nhận `403 FORBIDDEN`.
+
+Query: `role_code` (`nv-nhan`, `nv-cat`, `nv-soan`, `nv-dongoi`, `nv-kiemke`, `thukho`, `quanly`, `bgd`, `admin`), `status` (`ACTIVE`, `LOCKED`, `INACTIVE`, `EXPIRED`), `q` (tìm theo `username`, `full_name`), `page`, `page_size` (1–100). Sắp theo `role_code`, `username`.
+
+```
+200 {"data": [{"user_id": "…", "username": "nv_soan", "full_name": "Phạm Văn Soạn",
+               "role_code": "nv-soan", "role_name": "Nhân viên soạn hàng",
+               "primary_stage": "SOAN_HANG", "primary_warehouse_id": "…", "status": "ACTIVE",
+               "is_active": true, "is_seasonal": false, "valid_until": null,
+               "is_safety_checked": true, "can_receive_tasks": true}],
+     "meta": {"page": 1, "page_size": 20, "total": 1}}
+```
+
+`can_receive_tasks`: `ACTIVE`, và nếu là thời vụ thì phải đã kiểm an toàn (`is_safety_checked`) và còn hạn (`valid_until`) theo NV-DC-1. Màn hình giao task nên chỉ cho chọn người có giá trị `true`.
+
+Lỗi: `FORBIDDEN` 403; `VALIDATION_ERROR` 422 (`role_code`, `status`, `warehouse_id`, `page`, `page_size` sai).
 
 ## Mã lỗi riêng của module
 

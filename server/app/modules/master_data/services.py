@@ -711,6 +711,86 @@ def _load_config(db: Session, user: UserContext, raw_id: str, for_update: bool) 
 # ----------------------------------------------------------------------------- hàm công khai
 
 
+USER_STATUSES = ("ACTIVE", "LOCKED", "INACTIVE", "EXPIRED")
+USER_ROLE_CODES = (
+    "nv-nhan",
+    "nv-cat",
+    "nv-soan",
+    "nv-dongoi",
+    "nv-kiemke",
+    "thukho",
+    "quanly",
+    "bgd",
+    "admin",
+)
+MAX_USER_PAGE_SIZE = 100
+USER_ADMIN_PERMISSION = "AD-1"
+# Trường chỉ admin thấy; thukho, quanly chỉ cần biết ai làm được việc gì để giao task.
+ADMIN_ONLY_USER_FIELDS = ("email", "phone", "last_login_at")
+
+
+def _can_receive_tasks(row: dict[str, Any], now: datetime) -> bool:
+    """Nhận được task: đang hoạt động; thời vụ phải đã kiểm an toàn và còn hạn (NV-DC-1)."""
+    if row["status"] != "ACTIVE":
+        return False
+    if not row["is_seasonal"]:
+        return True
+    valid_until = row["valid_until"]
+    return bool(row["is_safety_checked"]) and (valid_until is None or valid_until > now)
+
+
+def list_users(
+    db: Session, user: UserContext, params: dict[str, str]
+) -> tuple[list[dict[str, Any]], int, int, int]:
+    """`GET /users` chỉ đọc.
+
+    - `admin` (AD-1): mọi người dùng, mọi kho (lọc `warehouse_id` tùy chọn), đủ trường.
+    - `thukho`, `quanly` (TK-1.1, điều phối task): chỉ người dùng thuộc kho mình, mặc định
+      `status=ACTIVE`, không trả email, điện thoại, lần đăng nhập cuối.
+    """
+    is_admin = USER_ADMIN_PERMISSION in user.permissions
+    try:
+        page = int(params.get("page", "1"))
+        page_size = int(params.get("page_size", "20"))
+    except ValueError:
+        raise _validation_error("page, page_size phải là số nguyên") from None
+    if page < 1 or not 1 <= page_size <= MAX_USER_PAGE_SIZE:
+        raise _validation_error(
+            f"page phải >= 1 và page_size trong khoảng 1 đến {MAX_USER_PAGE_SIZE}"
+        )
+
+    role_code = params.get("role_code") or None
+    if role_code is not None and role_code not in USER_ROLE_CODES:
+        raise _validation_error("role_code không hợp lệ", allowed=list(USER_ROLE_CODES))
+    status = params.get("status") or (None if is_admin else "ACTIVE")
+    if status is not None and status not in USER_STATUSES:
+        raise _validation_error("status không hợp lệ", allowed=list(USER_STATUSES))
+
+    if is_admin:
+        raw_wh = params.get("warehouse_id")
+        try:
+            warehouse_id = _parse_uuid(raw_wh) if raw_wh else None
+        except ValueError:
+            raise _validation_error("warehouse_id không phải UUID hợp lệ") from None
+    else:
+        warehouse_id = _require_warehouse(user)
+
+    rows, total = MasterDataRepository.list_users(
+        db, warehouse_id, role_code, status, params.get("q") or None, page, page_size
+    )
+    now = datetime.now(timezone.utc)
+    items = []
+    for row in rows:
+        item = {key: _json_value(value) for key, value in row.items()}
+        item["is_active"] = row["status"] == "ACTIVE"
+        item["can_receive_tasks"] = _can_receive_tasks(row, now)
+        if not is_admin:
+            for key in ADMIN_ONLY_USER_FIELDS:
+                item.pop(key, None)
+        items.append(item)
+    return items, total, page, page_size
+
+
 def find_by_code(
     db: Session, resource: str, code: str, warehouse_id: uuid.UUID | None = None
 ) -> dict[str, Any] | None:

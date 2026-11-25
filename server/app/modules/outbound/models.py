@@ -7,9 +7,26 @@ from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.app.core.database import Base
+
+ORDER_STATUSES = (
+    "NEW",
+    "PICKING",
+    "PICKED",
+    "PACKING",
+    "WAITING_WAYBILL",
+    "READY_TO_SHIP",
+    "SHIPPED",
+    "IN_TRANSIT",
+    "DELIVERED",
+    "PARTIAL_DELIVERED",
+    "DELIVERY_FAILED",
+    "ON_HOLD",
+    "CANCELLED",
+)
 
 
 class OutboundOrder(Base):
@@ -26,7 +43,11 @@ class OutboundOrder(Base):
     customer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     supplier_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     dest_warehouse_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    status: Mapped[str] = mapped_column(String(17), nullable=False, default="CREATED")
+    status: Mapped[str] = mapped_column(
+        PG_ENUM(*ORDER_STATUSES, name="order_status_type", create_type=False),
+        nullable=False,
+        default="NEW",
+    )
     is_urgent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     urgent_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     cutoff_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

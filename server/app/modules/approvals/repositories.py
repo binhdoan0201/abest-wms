@@ -211,3 +211,27 @@ def get_stock_adjustment_by_id(
     if for_update:
         stmt = stmt.with_for_update()
     return db.execute(stmt).scalar_one_or_none()
+
+
+def get_latest_approved_by_object(
+    db: Session,
+    warehouse_id: uuid.UUID,
+    object_type: str,
+    object_id: uuid.UUID,
+    for_update: bool = False,
+) -> ApprovalRequest | None:
+    """Lấy hồ sơ phê duyệt đã `APPROVED` mới nhất theo đối tượng nguồn."""
+    stmt = (
+        select(ApprovalRequest)
+        .where(
+            ApprovalRequest.warehouse_id == warehouse_id,
+            ApprovalRequest.object_type == cast(object_type, PG_APPROVAL_OBJECT),
+            ApprovalRequest.object_id == object_id,
+            ApprovalRequest.status == cast("APPROVED", PG_APPROVAL_STATUS),
+        )
+        .order_by(ApprovalRequest.created_at.desc())
+        .limit(1)
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    return db.execute(stmt).scalar_one_or_none()

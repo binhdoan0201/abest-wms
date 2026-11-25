@@ -1,0 +1,119 @@
+<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
+  {% if flash_msg %}
+  <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800">
+    ✓ {{ flash_msg }}
+  </div>
+  {% endif %}
+
+  {% if api_error %}
+  <div class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-800">
+    ⚠ [{{ api_error.code }}] {{ api_error.message }}
+  </div>
+  {% endif %}
+
+  {% if detail %}
+  <div class="flex items-start justify-between gap-2 border-b border-slate-200 pb-3">
+    <div>
+      <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Hồ sơ {{ detail.current_tier }} &bull; v{{ detail.version_no }}</span>
+      <h3 class="text-base font-bold text-slate-800 mt-0.5">{{ detail.object_type }}</h3>
+      <p class="text-xs font-mono text-slate-500 break-all">ID: {{ detail.approval_id }}</p>
+    </div>
+    {% if detail.locked_by_viewer_id %}
+    <form hx-post="/approvals/{{ detail.approval_id }}/unlock" hx-target="#approval-detail-panel" hx-swap="innerHTML">
+      <button type="submit" class="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100">
+        Mở khóa xem
+      </button>
+    </form>
+    {% endif %}
+  </div>
+
+  <dl class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-xl">
+    <div>
+      <dt class="text-slate-500">Trạng thái duyệt</dt>
+      <dd class="font-bold text-slate-800">{{ detail.status }}</dd>
+    </div>
+    <div>
+      <dt class="text-slate-500">Trạng thái thực thi</dt>
+      <dd class="font-bold text-slate-800">{{ detail.execution_status }}</dd>
+    </div>
+    <div>
+      <dt class="text-slate-500">Giá trị chênh lệch</dt>
+      <dd class="font-mono font-bold text-rose-700">{{ detail.discrepancy_value_amount }}</dd>
+    </div>
+    <div>
+      <dt class="text-slate-500">Hạn SLA</dt>
+      <dd class="font-medium text-slate-800">{{ detail.sla_due_at or 'Không giới hạn' }}</dd>
+    </div>
+  </dl>
+
+  {% if detail.status in ['PENDING_D1', 'PENDING_D2', 'PENDING_D3', 'NEED_INFO'] %}
+  <form hx-post="/approvals/{{ detail.approval_id }}/decide" hx-target="#approval-detail-panel" hx-swap="innerHTML" class="space-y-3 border-t border-slate-200 pt-3">
+    <input type="hidden" name="version_no" value="{{ detail.version_no }}">
+
+    <div>
+      <label class="block text-xs font-semibold text-slate-700 mb-1">Lý do / Ghi chú xử lý (Bắt buộc khi Từ chối hoặc Yêu cầu đếm lại)</label>
+      <textarea name="reason_or_note" rows="2" placeholder="Nhập lý do phê duyệt, từ chối hoặc yêu cầu đếm lại..." class="w-full rounded-lg border border-slate-300 p-2 text-xs"></textarea>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-indigo-50/60 p-3 rounded-xl border border-indigo-100">
+      <div>
+        <label class="block text-[11px] font-semibold text-slate-700 mb-1">Xác thực lại (khi Duyệt)</label>
+        <select name="reauth_method" class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs bg-white">
+          <option value="PASSWORD">PASSWORD</option>
+          <option value="BIOMETRIC">BIOMETRIC</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[11px] font-semibold text-slate-700 mb-1">Mật khẩu xác nhận</label>
+        <input type="password" name="reauth_password" placeholder="Nhập mật khẩu hiện tại" class="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+      </div>
+    </div>
+
+    <label class="flex items-center gap-2 text-xs text-slate-700">
+      <input type="checkbox" name="request_recount" value="true" class="rounded border-slate-300">
+      <span>Yêu cầu nhân viên kiểm kê đếm lại (khi chọn Yêu cầu bổ sung / đếm lại)</span>
+    </label>
+
+    <div class="grid grid-cols-2 gap-2 pt-1">
+      <button type="submit" name="action" value="approve" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">
+        ✓ Phê duyệt
+      </button>
+      <button type="submit" name="action" value="reject" class="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700">
+        ✕ Từ chối
+      </button>
+      <button type="submit" name="action" value="request_info" class="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">
+        ↻ Yêu cầu đếm lại / Bổ sung
+      </button>
+      {% if detail.current_tier == 'D1_THUKHO' %}
+      <button type="submit" name="action" value="escalate" class="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700">
+        ↑ Chuyển cấp D2
+      </button>
+      {% endif %}
+    </div>
+  </form>
+  {% endif %}
+
+  <div class="border-t border-slate-200 pt-3">
+    <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Lịch sử xử lý ({{ detail.histories|length }})</h4>
+    <div class="space-y-2 max-h-56 overflow-y-auto">
+      {% for h in detail.histories %}
+      <div class="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs">
+        <div class="flex justify-between font-semibold text-slate-700">
+          <span>[{{ h.tier }}] {{ h.action }}</span>
+          <span class="text-[11px] text-slate-400">{{ h.created_at }}</span>
+        </div>
+        {% if h.recommendation_or_reason %}
+        <p class="text-slate-600 mt-1">{{ h.recommendation_or_reason }}</p>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="text-xs text-slate-400">Chưa có lịch sử thao tác.</p>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="py-12 text-center text-slate-400 text-sm">
+    Chọn một hồ sơ ở danh sách bên trái để xem chi tiết, khóa xử lý và ra quyết định phê duyệt.
+  </div>
+  {% endif %}
+</div>

@@ -14,7 +14,7 @@
 - Lỗi: `NOT_FOUND` 404
 
 ### POST /api/v1/outbound-orders/{order_id}/allocate
-- Mục đích: Cấp phát tồn kho theo FEFO/FIFO, ghi `inventory_allocations` và giữ tồn `ALLOCATED`
+- Mục đích: Cấp phát tồn kho theo FEFO/FIFO, ghi `inventory_allocations` và giữ tồn `ALLOCATED`; loại bỏ các lô đã hết hạn (`expiry_date < CURRENT_DATE`) hoặc có hạn dùng nhỏ hơn ngày giao (`expiry_date < cutoff_time.date()`) khi có `cutoff_time`
 - Vai trò: `thukho` (quyền `SO-1`, mức `G`; `quanly` chỉ có mức `V` nên bị từ chối 403)
 - Phản hồi 200: Kết quả cấp phát tồn kho cho đơn
 - Lỗi: `NOT_FOUND` 404, `VERSION_CONFLICT` 409, `INVALID_STATE` 409, `ORDER_FROZEN` 409, `OUTBOUND_INSUFFICIENT_ALLOCATABLE_STOCK` 409
@@ -38,7 +38,7 @@
 - Lỗi: `NOT_FOUND` 404, `VERSION_CONFLICT` 409, `INVALID_STATE` 409, `ORDER_FROZEN` 409, `OUTBOUND_PICK_QTY_EXCEEDED` 409, `OUTBOUND_PARTIAL_PICK_REQUIRES_EXCEPTION` 409, `OUTBOUND_INVALID_ACTUAL_LOT` 409
 
 ### POST /api/v1/pick-sessions/{pick_session_id}/lines/{pick_line_id}/exception
-- Mục đích: Báo cáo ngoại lệ khi lấy hàng (thiếu, hư hỏng, sai lô), giải phóng toàn bộ phân bổ dòng soạn và chuyển đơn sang `ON_HOLD`
+- Mục đích: Báo cáo ngoại lệ khi lấy hàng (thiếu, hư hỏng, sai lô), **giải phóng và trả lại toàn bộ số lượng cần soạn (`qty_to_pick`)** về tồn khả dụng (`AVAILABLE`), chuyển phân bổ sang `RELEASED` và đưa đơn sang `ON_HOLD` (không giữ lại phần lẻ)
 - Vai trò: `nv-soan` (quyền `SO-1`, mức `X_OWN`)
 - Phản hồi 200: Dòng soạn đã ghi nhận ngoại lệ và đưa phiên sang `ON_HOLD_SHORTAGE`
 - Lỗi: `NOT_FOUND` 404, `INVALID_STATE` 409, `OUTBOUND_INVALID_REASON_CODE` 422
@@ -50,13 +50,13 @@
 - Lỗi: `NOT_FOUND` 404, `VERSION_CONFLICT` 409, `INVALID_STATE` 409, `ORDER_FROZEN` 409, `OUTBOUND_EXCEED_PICKED_QTY` 409
 
 ### POST /api/v1/goods-issues
-- Mục đích: Lập phiếu xuất kho (GI), gắn các kiện hàng của đơn và phương tiện vận chuyển
+- Mục đích: Lập phiếu xuất kho (GI), gắn các kiện hàng của đơn, phương tiện vận chuyển và gọi TMS xin vận đơn (`request_waybill`; nếu TMS lỗi trả `None` thì chuyển đơn sang `WAITING_WAYBILL`)
 - Vai trò: `nv-dongoi` (quyền `DG-1`, mức `X`)
 - Phản hồi 201: Phiếu xuất kho GI vừa khởi tạo
 - Lỗi: `NOT_FOUND` 404, `VERSION_CONFLICT` 409, `INVALID_STATE` 409, `ORDER_FROZEN` 409, `OUTBOUND_NO_PACKAGES` 409
 
 ### POST /api/v1/goods-issues/{gi_id}/confirm
-- Mục đích: Xác nhận bàn giao vận chuyển, trừ tồn kho `ALLOCATED` và chuyển đơn sang `SHIPPED`
+- Mục đích: Xác nhận bàn giao vận chuyển, trừ tồn kho `ALLOCATED`, chuyển đơn sang `SHIPPED` và xếp phiếu xuất `GI` vào hàng đợi gửi ERP (`enqueue_to_erp`)
 - Vai trò: `nv-dongoi` (quyền `DG-1`, mức `X`)
 - Phản hồi 200: Phiếu xuất kho đã xác nhận `GI_CONFIRMED`
 - Lỗi: `NOT_FOUND` 404, `VERSION_CONFLICT` 409, `INVALID_STATE` 409, `ORDER_FROZEN` 409, `OUTBOUND_DRIVER_SIGNATURE_REQUIRED` 409
