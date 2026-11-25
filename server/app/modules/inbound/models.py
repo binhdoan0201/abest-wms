@@ -6,9 +6,19 @@ from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, Integer, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.app.core.database import Base
+
+PO_STATUSES = (
+    "PENDING",
+    "RECEIVING",
+    "PARTIAL_RECEIVED",
+    "FULLY_RECEIVED",
+    "CLOSED",
+    "CANCELLED",
+)
 
 
 class PurchaseOrder(Base):
@@ -22,7 +32,11 @@ class PurchaseOrder(Base):
     erp_po_number: Mapped[str] = mapped_column(String(100), nullable=False)
     warehouse_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     supplier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="OPEN")
+    status: Mapped[str] = mapped_column(
+        PG_ENUM(*PO_STATUSES, name="po_status_type", create_type=False),
+        nullable=False,
+        default="PENDING",
+    )
     expected_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     version_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
