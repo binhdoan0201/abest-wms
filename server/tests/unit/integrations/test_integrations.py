@@ -62,6 +62,12 @@ def test_enqueue_to_erp_stops_retrying_after_max() -> None:
     try:
         warehouse_id = _warehouse_id(db)
         user = _quanly(warehouse_id)
+        db.execute(
+            text(
+                "DELETE FROM integration_sync_logs WHERE status IN ('PENDING', 'FAILED_TECHNICAL');"
+            )
+        )
+        db.commit()
         get_erp_gateway().configure_failures("TECHNICAL_ERROR", MAX_RETRIES + 5)
         sync_id = enqueue_to_erp(db, warehouse_id, "GRN", uuid.uuid4(), {"grn": "test"})
 

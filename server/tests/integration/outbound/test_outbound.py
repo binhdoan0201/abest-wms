@@ -1,10 +1,12 @@
 """Integration tests cho luồng nghiệp vụ khép kín của module Outbound."""
 
 import uuid
+from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -12,6 +14,57 @@ from server.app.core.database import SessionLocal
 from server.app.core.exceptions import BusinessError
 from server.app.main import app
 from server.app.modules.inventory import apply_movement
+
+
+def _cleanup_loc_a01_01() -> None:
+    db = SessionLocal()
+    try:
+        loc_id = db.execute(
+            text(
+                "SELECT location_id FROM locations "
+                "WHERE warehouse_id = :wh AND location_code = 'LOC-A01-01';"
+            ),
+            {"wh": WAREHOUSE_ID},
+        ).scalar_one_or_none()
+        if loc_id is not None:
+            db.execute(
+                text(
+                    "DELETE FROM pick_lines WHERE allocation_id IN ("
+                    "    SELECT allocation_id FROM inventory_allocations WHERE balance_id IN ("
+                    "        SELECT balance_id FROM inventory_balances "
+                    "        WHERE warehouse_id = :wh AND location_id = :loc AND sku_id = :sku"
+                    "    )"
+                    ");"
+                ),
+                {"wh": WAREHOUSE_ID, "loc": loc_id, "sku": SKU_ID},
+            )
+            db.execute(
+                text(
+                    "DELETE FROM inventory_allocations WHERE balance_id IN ("
+                    "    SELECT balance_id FROM inventory_balances "
+                    "    WHERE warehouse_id = :wh AND location_id = :loc AND sku_id = :sku"
+                    ");"
+                ),
+                {"wh": WAREHOUSE_ID, "loc": loc_id, "sku": SKU_ID},
+            )
+            db.execute(
+                text(
+                    "DELETE FROM inventory_balances "
+                    "WHERE warehouse_id = :wh AND location_id = :loc AND sku_id = :sku;"
+                ),
+                {"wh": WAREHOUSE_ID, "loc": loc_id, "sku": SKU_ID},
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture(autouse=True)
+def auto_cleanup_outbound_stock() -> Generator[None, None, None]:
+    _cleanup_loc_a01_01()
+    yield
+    _cleanup_loc_a01_01()
+
 
 client = TestClient(app)
 
@@ -647,3 +700,120 @@ def test_outbound_c08_picking_exception_form_end_to_end() -> None:
         assert "ON_HOLD_SHORTAGE" in submit.text
     finally:
         ApiClient.backend_app = orig
+
+
+def test_outbound_erp_so_tms_waiting_waybill_and_gi_outbox() -> None:
+    """Kiểm thử ERP đẩy SO -> TMS lỗi ra WAITING_WAYBILL -> Xác nhận GI đẩy outbox ERP."""
+    from server.app.integrations.tms_mock import get_tms_gateway
+    from server.app.modules.integrations import register_erp_handler
+    from server.app.modules.outbound.erp_handlers import receive_outbound_order
+
+    register_erp_handler("SO", receive_outbound_order)
+
+    admin_token = _login("admin")
+    thukho_token = _login("thukho")
+    soan_token = _login("nv_soan")
+    dongoi_token = _login("nv_dongoi")
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                "UPDATE tasks SET status = 'COMPLETED' "
+                "WHERE assigned_to = (SELECT user_id FROM users WHERE username = 'nv_soan') "
+                "AND status IN ('ASSIGNED', 'IN_PROGRESS');"
+            )
+        )
+        loc_id = db.execute(
+            text(
+                "SELECT location_id FROM locations "
+                "WHERE warehouse_id = :wh AND location_code = 'LOC-A01-01';"
+            ),
+            {"wh": WAREHOUSE_ID},
+        ).scalar_one()
+        actor_id = db.execute(
+            text("SELECT user_id FROM users WHERE username = 'thukho' LIMIT 1;")
+        ).scalar_one()
+        apply_movement(
+            db=db,
+            warehouse_id=WAREHOUSE_ID,
+            location_id=loc_id,
+            sku_id=SKU_ID,
+            lot_id=None,
+            pallet_id=None,
+            serial_number=None,
+            tx_type="ADJUSTMENT",
+            delta_available=Decimal("15.000"),
+            ref_doc_type="TEST_ERP_SO",
+            ref_doc_id=uuid.uuid4(),
+            performed_by=actor_id,
+        )
+        db.commit()
+    finally:
+        db.close()
+    erp_no = f"SO-ERP-{uuid.uuid4().hex[:8].upper()}"
+    cutoff = (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
+    so_res = client.post(
+        "/api/v1/integrations/erp/outbound-orders",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "erp_order_number": erp_no,
+            "order_type": "SO",
+            "warehouse_code": "WH01",
+            "customer_code": "CUST-001",
+            "cutoff_time": cutoff,
+            "lines": [{"line_number": 1, "sku_code": "SKU-ELEC-003", "qty_ordered": "4.000"}],
+        },
+    )
+    assert so_res.status_code == 201, so_res.text
+    order_id = so_res.json()["data"]["doc_id"]
+    assert (
+        client.post(
+            f"/api/v1/outbound-orders/{order_id}/allocate",
+            headers={"Authorization": f"Bearer {thukho_token}"},
+            json={"strategy": "FIFO"},
+        ).status_code
+        == 200
+    )
+    ps = client.post(
+        "/api/v1/pick-sessions",
+        headers={"Authorization": f"Bearer {thukho_token}"},
+        json={"order_ids": [order_id]},
+    ).json()["data"]
+    pl = ps["lines"][0]
+    assert (
+        client.post(
+            f"/api/v1/pick-sessions/{ps['pick_session_id']}/lines/{pl['pick_line_id']}/confirm",
+            headers={"Authorization": f"Bearer {soan_token}"},
+            json={"qty_picked": pl["qty_to_pick"], "version_no": ps["version_no"]},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/outbound-orders/{order_id}/packages",
+            headers={"Authorization": f"Bearer {dongoi_token}"},
+            json={"weight_kg": "3.000"},
+        ).status_code
+        == 201
+    )
+    tms = get_tms_gateway()
+    tms.configure_failures("TECHNICAL_ERROR", 1)
+    try:
+        gi = client.post(
+            "/api/v1/goods-issues",
+            headers={"Authorization": f"Bearer {dongoi_token}"},
+            json={"order_id": order_id},
+        ).json()["data"]
+        assert gi["tms_waybill_code"] is None and gi["order_status"] == "WAITING_WAYBILL"
+    finally:
+        tms.configure_failures("NONE", 0)
+    cfm = client.post(
+        f"/api/v1/goods-issues/{gi['gi_id']}/confirm",
+        headers={"Authorization": f"Bearer {dongoi_token}"},
+        json={"driver_signature_data": "data:image/png;base64,SIGN_OK"},
+    ).json()["data"]
+    assert (
+        cfm["status"] == "GI_CONFIRMED"
+        and cfm["order_status"] == "SHIPPED"
+        and cfm["erp_sync_id"] is not None
+    )
