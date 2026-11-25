@@ -6,6 +6,7 @@ Quy tắc kiến trúc:
 """
 
 import uuid
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -251,6 +252,7 @@ class OutboundRepository:
         warehouse_id: uuid.UUID,
         sku_id: uuid.UUID,
         strategy: str,
+        min_expiry_date: date | None = None,
     ) -> list[dict[str, Any]]:
         """Tìm các dòng tồn khả dụng tại khu STORAGE theo chiến lược FEFO hoặc FIFO."""
         order_by = (
@@ -285,7 +287,14 @@ class OutboundRepository:
               AND loc.is_active = TRUE
               AND loc.status NOT IN ('COUNTING_LOCKED', 'MAINTENANCE_LOCKED', 'DAMAGED_HOLD')
               AND z.zone_type = 'STORAGE'
-              AND (lt.lot_id IS NULL OR lt.expiry_date IS NULL OR lt.expiry_date >= CURRENT_DATE)
+              AND (
+                  lt.lot_id IS NULL
+                  OR lt.expiry_date IS NULL
+                  OR (
+                      lt.expiry_date >= CURRENT_DATE
+                      AND (:min_expiry_date IS NULL OR lt.expiry_date >= :min_expiry_date)
+                  )
+              )
             ORDER BY {order_by}
             FOR UPDATE OF b;
             """
@@ -293,7 +302,11 @@ class OutboundRepository:
         rows = (
             db.execute(
                 stmt,
-                {"warehouse_id": warehouse_id, "sku_id": sku_id},
+                {
+                    "warehouse_id": warehouse_id,
+                    "sku_id": sku_id,
+                    "min_expiry_date": min_expiry_date,
+                },
             )
             .mappings()
             .all()
