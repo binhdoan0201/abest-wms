@@ -491,6 +491,7 @@ def test_update_approval_execution_status_and_mark_executed() -> None:
     try:
         _, nv_nhan = _get_user_by_role(db, "nv-nhan")
         _, thukho = _get_user_by_role(db, "thukho")
+        assert nv_nhan.warehouse_id is not None
         grn_id = uuid.uuid4()
 
         req = create_approval_request(
@@ -520,7 +521,7 @@ def test_update_approval_execution_status_and_mark_executed() -> None:
             username=thukho.username,
             role_code="thukho",
             warehouse_id=thukho.warehouse_id,
-            permissions=set(),
+            permissions={"TK-3.2": "D1"},
         )
         approved = services.approve_request(
             db=db,

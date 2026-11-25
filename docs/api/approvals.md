@@ -90,4 +90,4 @@ Import từ `server.app.modules.approvals`:
 
 - **`STOCK_ADJUSTMENT`:** Do `approvals` tự gọi `apply_movement` và đẩy hàng đợi ERP ngay trong `POST /api/v1/approvals/{approval_id}/approve` (`execution_status = EXECUTED_INVENTORY`).
 - **`GRN_DISCREPANCY`:** Khi duyệt xong, `approvals` đặt `execution_status = WAITING_EXECUTION`. Phân hệ `inbound` thực thi ghi tồn trong `POST /grns/{id}/complete` rồi gọi `mark_object_approval_executed(..., "GRN_DISCREPANCY", grn_id, ...)` để chuyển sang `EXECUTED_INVENTORY`.
-- **`CYCLE_COUNT_DIFF`:** Khi duyệt xong, `approvals` đặt `execution_status = WAITING_EXECUTION`. Phân hệ `cycle_count` thực thi ghi tồn điều chỉnh kiểm kê (`apply_movement` với `tx_type="CYCLE_COUNT_ADJ"`) rồi gọi `mark_object_approval_executed(..., "CYCLE_COUNT_DIFF", count_id, ...)` để chuyển sang `EXECUTED_INVENTORY`.
+- **`CYCLE_COUNT_DIFF`:** Khi duyệt xong, `approvals` đặt `execution_status = WAITING_EXECUTION`. Phân hệ `cycle_count` thực thi ghi tồn điều chỉnh kiểm kê (`apply_movement` với `tx_type="CYCLE_COUNT"`) rồi gọi `mark_object_approval_executed(..., "CYCLE_COUNT_DIFF", count_id, ...)` để chuyển sang `EXECUTED_INVENTORY`.
