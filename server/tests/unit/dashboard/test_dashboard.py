@@ -109,22 +109,24 @@ def test_inventory_expiry_occupancy_and_min_stock(db: Session) -> None:
     wh = _warehouse(db)
     user = _quanly(wh)
     before = DashboardService.get_inventory(db, user, near_expiry_days=30)
+    narrow_before = DashboardService.get_inventory(db, user, near_expiry_days=3)
 
     sku_id, min_level = db.execute(
         text("SELECT sku_id, min_stock_level FROM skus WHERE sku_code = 'SKU-FOOD-001'")
     ).one()
-    loc_a = _scalar(
-        db,
-        "SELECT location_id FROM locations WHERE location_code = 'LOC-A01-01' AND "
-        "warehouse_id = :wh",
-        wh=wh,
-    )
-    loc_b = _scalar(
-        db,
-        "SELECT location_id FROM locations WHERE location_code = 'LOC-A01-02' AND "
-        "warehouse_id = :wh",
-        wh=wh,
-    )
+    # Chọn hai vị trí đang trống: test module khác có thể để lại hàng ở các vị trí cố định.
+    empty_locations = [
+        row[0]
+        for row in db.execute(
+            text(
+                "SELECT location_id FROM locations WHERE warehouse_id = :wh AND is_active "
+                "AND status = 'EMPTY' ORDER BY location_code LIMIT 2"
+            ),
+            {"wh": wh},
+        ).all()
+    ]
+    assert len(empty_locations) == 2, "Cần ít nhất 2 vị trí trống trong kho WH01"
+    loc_a, loc_b = empty_locations
     today = before.scope.business_date  # ngày theo giờ Việt Nam, không theo máy chạy test
     lots = {}
     for suffix, expiry in (("NEAR", today + timedelta(days=5)), ("OLD", today - timedelta(days=1))):
@@ -165,7 +167,7 @@ def test_inventory_expiry_occupancy_and_min_stock(db: Session) -> None:
 
     # Ngưỡng 3 ngày thì lô còn 5 ngày không còn tính là sắp hết hạn.
     narrow = DashboardService.get_inventory(db, user, near_expiry_days=3)
-    assert narrow.near_expiry_lots == after.near_expiry_lots - 1
+    assert narrow.near_expiry_lots == narrow_before.near_expiry_lots
 
 
 def test_orders_late_on_hold_fulfillment_and_alerts(db: Session) -> None:
