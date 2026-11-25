@@ -207,10 +207,10 @@ def test_grn_discrepancy_approval_marks_executed_on_complete() -> None:
         db.execute(
             text(
                 "INSERT INTO po_lines "
-                "(po_line_id, po_id, line_no, sku_id, uom_id, qty_ordered, unit_price) "
-                "VALUES (:lid, :po_id, 1, :sku_id, :uom_id, 10.000, 100000.00);"
+                "(po_line_id, po_id, line_number, sku_id, uom_code, qty_ordered) "
+                "VALUES (:lid, :po_id, 1, :sku_id, :uom_code, 10.000);"
             ),
-            {"lid": po_line_id, "po_id": po_id, "sku_id": sku_id, "uom_id": uom_id},
+            {"lid": po_line_id, "po_id": po_id, "sku_id": sku_id, "uom_code": uom_id},
         )
         db.commit()
 
