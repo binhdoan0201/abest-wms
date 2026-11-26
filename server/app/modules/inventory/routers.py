@@ -83,12 +83,12 @@ def get_transactions(
 def get_lots(
     sku_id: uuid.UUID | None = Query(None),
     user_ctx: UserContext = Depends(get_current_user),
+    _perm: str = Depends(require_permission("QL-1.1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Danh sách lô hàng và hạn dùng (thukho, quanly)."""
-    if user_ctx.role_code not in ("thukho", "quanly"):
-        raise BusinessError(code="FORBIDDEN", message="Không có quyền truy cập", http_status=403)
-
+    """Danh sách lô hàng và hạn dùng: mọi vai trò xem được tồn (QL-1.1), để nhân viên biết lô nào
+    sắp hết hạn. `nv-kiemke` không có QL-1.1 nên vẫn bị chặn (đếm mù), `admin` bị chặn.
+    """
     lots = InventoryService.get_lots(db=db, sku_id=sku_id)
     return success_response(data=[lo.model_dump() for lo in lots], total=len(lots))
 
