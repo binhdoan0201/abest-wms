@@ -224,6 +224,7 @@ class OutboundRepository:
                 p.order_id,
                 p.pick_session_id,
                 p.gi_id,
+                gi.gi_number,
                 p.box_type_id,
                 p.weight_kg,
                 p.packed_by,
@@ -231,6 +232,7 @@ class OutboundRepository:
                 p.is_loaded_on_truck,
                 p.loaded_at
             FROM packages p
+            LEFT JOIN goods_issues gi ON gi.gi_id = p.gi_id
             WHERE p.order_id = :order_id
             ORDER BY p.packed_at ASC;
             """

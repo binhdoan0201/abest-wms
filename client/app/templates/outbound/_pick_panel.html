@@ -14,7 +14,7 @@
   {% if flash_msg %}<div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{{ flash_msg }}</div>{% endif %}
   {% if api_error %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>[{{ api_error.code }}]</strong> {{ api_error.message }}</div>{% endif %}
   {% if pick_session %}
-  <div class="text-sm text-slate-600">Phiên: <strong>{{ pick_session.pick_session_code or pick_session.session_code or pick_session.pick_session_id }}</strong> | Trạng thái: <strong>{{ pick_session.status }}</strong> | v{{ pick_session.version_no }}</div>
+  <div class="text-sm text-slate-600">Phiên: <strong>{{ pick_session.display_label or pick_session.pick_session_code or pick_session.session_code }}</strong> | Trạng thái: <strong>{{ pick_session.status }}</strong> | v{{ pick_session.version_no }}</div>
   <div class="overflow-x-auto">
     <table class="min-w-full divide-y divide-slate-200 text-sm">
       <thead class="bg-slate-50 text-left font-semibold text-slate-600">

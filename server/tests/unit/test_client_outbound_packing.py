@@ -243,3 +243,113 @@ def test_to_vn_date_utc_midnight_rollover() -> None:
 
     dt_utc = datetime(2026, 11, 25, 20, 0, tzinfo=timezone.utc)
     assert str(_to_vn_date(dt_utc)) == "2026-11-26"
+
+
+# --- Route-level tests for picking sessions & GI waybill persistence ---
+def test_picking_route_loads_sessions_from_user_tasks(
+    web: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cookies = _login(web, "nv_dongoi")
+
+    def fake_get(
+        self: ApiClient, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/auth/me":
+            return {
+                "data": {
+                    "username": "nv_soanhang",
+                    "role_code": "nv_soanhang",
+                    "permissions": ["SO-1"],
+                }
+            }
+        if path == "/tasks":
+            return {
+                "data": [
+                    {
+                        "task_type": "PICKING",
+                        "ref_doc_type": "PICK_SESSION",
+                        "ref_doc_id": "ps-12345678",
+                        "status": "IN_PROGRESS",
+                    },
+                    {
+                        "task_type": "PICKING",
+                        "ref_doc_type": "PICK_SESSION",
+                        "ref_doc_id": "ps-done-999",
+                        "status": "COMPLETED",
+                    },
+                    {
+                        "task_type": "PUTAWAY",
+                        "ref_doc_type": "PUTAWAY_TASK",
+                        "ref_doc_id": "pa-999",
+                        "status": "PENDING",
+                    },
+                ]
+            }
+        if path.startswith("/pick-sessions/ps-12345678"):
+            return {
+                "data": {
+                    "pick_session_id": "ps-12345678",
+                    "status": "IN_PROGRESS",
+                    "version_no": 1,
+                    "lines": [
+                        {
+                            "erp_order_number": "SO-2026-001",
+                            "qty_to_pick": 5,
+                            "status": "PENDING",
+                        }
+                    ],
+                }
+            }
+        return {"data": []}
+
+    monkeypatch.setattr(ApiClient, "get", fake_get)
+    resp = web.get("/outbound/picking?session_id=ps-12345678", cookies=cookies)
+    assert resp.status_code == 200
+    assert 'value="ps-12345678"' in resp.text
+    assert "Soạn đơn SO-2026-001" in resp.text
+    assert "ps-done-999" not in resp.text
+
+
+def test_pack_and_ship_route_confirm_gi_waybill_error_keeps_selected_gi(
+    web: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cookies = _login(web, "nv_dongoi")
+
+    def fake_get(
+        self: ApiClient, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/auth/me":
+            return {
+                "data": {
+                    "username": "nv_dongoi",
+                    "role_code": "nv_dongoi",
+                    "permissions": ["DG-1"],
+                }
+            }
+        return {"data": []}
+
+    def fake_post(
+        self: ApiClient, path: str, json_data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/goods-issues/gi-1/confirm":
+            raise ClientApiError(
+                code="OUTBOUND_WAYBILL_REQUIRED",
+                message="Missing waybill",
+                http_status=409,
+            )
+        return {"data": {}}
+
+    monkeypatch.setattr(ApiClient, "get", fake_get)
+    monkeypatch.setattr(ApiClient, "post", fake_post)
+    resp = web.post(
+        "/outbound/pack-and-ship",
+        data={
+            "action": "confirm_gi",
+            "gi_id": "gi-1",
+            "driver_signature_data": "Nguyen Van A",
+        },
+        cookies=cookies,
+    )
+    assert resp.status_code == 200
+    assert "OUTBOUND_WAYBILL_REQUIRED" in resp.text
+    assert '<option value="gi-1" selected>' in resp.text
