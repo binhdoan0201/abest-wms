@@ -7,9 +7,11 @@ Quy tắc kiến trúc:
 """
 
 import uuid
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -98,8 +100,29 @@ def _require_access(access_type: str | None, allowed: tuple[str, ...]) -> None:
         )
 
 
+def _to_vn_date(raw_val: date | datetime | str) -> date:
+    vn_tz = ZoneInfo("Asia/Ho_Chi_Minh")
+    if isinstance(raw_val, datetime):
+        dt = raw_val if raw_val.tzinfo is not None else raw_val.replace(tzinfo=ZoneInfo("UTC"))
+        return dt.astimezone(vn_tz).date()
+    if isinstance(raw_val, date):
+        return raw_val
+    return datetime.fromisoformat(str(raw_val)).astimezone(vn_tz).date()
+
+
 class OutboundService:
     """Service điều phối quy trình xuất kho, cấp phát, soạn hàng, đóng gói và phát hành GI."""
+
+    _DG1_ALLOWED_STATUSES: tuple[str, ...] = (
+        "PICKED",
+        "PACKING",
+        "READY_TO_SHIP",
+        "WAITING_WAYBILL",
+    )
+
+    @staticmethod
+    def _is_dg1_only(user_ctx: UserContext) -> bool:
+        return "DG-1" in user_ctx.permissions and "QL-2.1" not in user_ctx.permissions
 
     @staticmethod
     def list_orders(
@@ -110,12 +133,19 @@ class OutboundService:
         page_size: int = 20,
         access_type: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
+        statuses_filter: list[str] | None = None
+        if OutboundService._is_dg1_only(user_ctx):
+            if status and status not in OutboundService._DG1_ALLOWED_STATUSES:
+                return [], 0
+            statuses_filter = [status] if status else list(OutboundService._DG1_ALLOWED_STATUSES)
+            status = None
         return OutboundRepository.list_orders(
             db=db,
             warehouse_id=user_ctx.warehouse_id,
             status=status,
             page=page,
             page_size=page_size,
+            statuses=statuses_filter,
         )
 
     @staticmethod
@@ -133,6 +163,14 @@ class OutboundService:
                 http_status=404,
             )
         enforce_warehouse_scope(user_ctx, order["warehouse_id"])
+        if OutboundService._is_dg1_only(user_ctx) and (
+            str(order.get("status") or "") not in OutboundService._DG1_ALLOWED_STATUSES
+        ):
+            raise BusinessError(
+                code="NOT_FOUND",
+                message="Không tìm thấy đơn xuất kho",
+                http_status=404,
+            )
 
         lines_raw = OutboundRepository.get_order_lines(db, order_id)
         allocs_raw = OutboundRepository.get_order_allocations(db, order_id)
@@ -283,7 +321,7 @@ class OutboundService:
                 )
                 cutoff_raw = order.get("cutoff_time")
                 min_expiry = (
-                    cutoff_raw.date()
+                    _to_vn_date(cutoff_raw)
                     if hasattr(cutoff_raw, "date") and cutoff_raw is not None
                     else None
                 )

@@ -32,7 +32,7 @@ def get_outbound_orders(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     user_ctx: UserContext = Depends(get_current_user),
-    access_type: str = Depends(require_permission("QL-2.1")),
+    access_type: str = Depends(require_permission("QL-2.1", "DG-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     items, total = OutboundService.list_orders(
@@ -50,7 +50,7 @@ def get_outbound_orders(
 def get_outbound_order_by_id(
     order_id: uuid.UUID,
     user_ctx: UserContext = Depends(get_current_user),
-    access_type: str = Depends(require_permission("QL-2.1")),
+    access_type: str = Depends(require_permission("QL-2.1", "DG-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
     data = OutboundService.get_order_detail(db=db, user_ctx=user_ctx, order_id=order_id)

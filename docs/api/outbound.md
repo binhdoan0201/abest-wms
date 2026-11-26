@@ -4,12 +4,12 @@
 
 ### GET /api/v1/outbound-orders
 - Mục đích: Xem danh sách đơn xuất kho theo kho hiện tại (`?status=&page=1&page_size=20`)
-- Vai trò: `thukho`, `quanly` (quyền `QL-2.1`)
+- Vai trò: `thukho`, `quanly` (quyền `QL-2.1`), `nv_dongoi` (quyền `DG-1`, chỉ xem đơn `PICKED`, `PACKING`, `READY_TO_SHIP`, `WAITING_WAYBILL`)
 - Phản hồi 200: Danh sách đơn xuất kèm `meta` phân trang
 
 ### GET /api/v1/outbound-orders/{order_id}
 - Mục đích: Xem chi tiết đơn xuất kho, các dòng hàng, phân bổ tồn và kiện hàng
-- Vai trò: `thukho`, `quanly` (quyền `QL-2.1`)
+- Vai trò: `thukho`, `quanly` (quyền `QL-2.1`), `nv_dongoi` (quyền `DG-1`, chỉ xem đơn `PICKED`, `PACKING`, `READY_TO_SHIP`, `WAITING_WAYBILL`)
 - Phản hồi 200: Chi tiết đơn xuất kho
 - Lỗi: `NOT_FOUND` 404
 
