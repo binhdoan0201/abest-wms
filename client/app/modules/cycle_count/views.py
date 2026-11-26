@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -42,7 +43,7 @@ def cycle_count_index(
     api = ApiClient(token=get_session_token(request))
     menu = build_user_menu(user)
     perms = _perms(user)
-    if "KK-1" not in perms:
+    if "KK-1" not in perms and "TK-1.1" not in perms:
         return _tpl(request).TemplateResponse(
             request=request,
             name="_base/403.html",
@@ -95,12 +96,42 @@ def cycle_count_create(
             "/cycle-counts",
             json_data={"count_type": count_type, "due_at": due_at, "location_ids": loc_ids},
         ).get("data", {})
+        msg = quote_plus("Đã tạo phiếu kiểm kê")
         return RedirectResponse(
-            url=f"/cycle-count?sheet_id={data.get('count_sheet_id', '')}&msg=Đã+tạo+phiếu+kiểm+kê",
+            url=f"/cycle-count?sheet_id={data.get('count_sheet_id', '')}&msg={msg}",
             status_code=303,
         )
     except ClientApiError as exc:
-        return RedirectResponse(url=f"/cycle-count?err={exc.message}", status_code=303)
+        return RedirectResponse(url=f"/cycle-count?err={quote_plus(exc.message)}", status_code=303)
+
+
+def _submit_count(
+    request: Request,
+    sheet_id: str,
+    line_id: str,
+    blind_counted_qty: str,
+    override_reason: str,
+    is_recount: bool,
+) -> Response:
+    api = ApiClient(token=get_session_token(request))
+    endpoint = "recount" if is_recount else "count"
+    try:
+        api.post(
+            f"/cycle-counts/{sheet_id}/lines/{line_id}/{endpoint}",
+            json_data={
+                "blind_counted_qty": blind_counted_qty.strip(),
+                "same_counter_override_reason": override_reason.strip() or None,
+            },
+        )
+        msg_text = "Đã ghi nhận kết quả đếm lại" if is_recount else "Đã ghi nhận kết quả đếm mù"
+        return RedirectResponse(
+            url=f"/cycle-count?sheet_id={sheet_id}&msg={quote_plus(msg_text)}",
+            status_code=303,
+        )
+    except ClientApiError as exc:
+        return RedirectResponse(
+            url=f"/cycle-count?sheet_id={sheet_id}&err={quote_plus(exc.message)}", status_code=303
+        )
 
 
 @router.post("/cycle-count/{sheet_id}/lines/{line_id}/count")
@@ -113,24 +144,33 @@ def cycle_count_record(
     override_reason: str = Form(default=""),
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Response:
-    api = ApiClient(token=get_session_token(request))
-    endpoint = "recount" if mode == "recount" else "count"
-    try:
-        api.post(
-            f"/cycle-counts/{sheet_id}/lines/{line_id}/{endpoint}",
-            json_data={
-                "blind_counted_qty": blind_counted_qty.strip(),
-                "same_counter_override_reason": override_reason.strip() or None,
-            },
-        )
-        return RedirectResponse(
-            url=f"/cycle-count?sheet_id={sheet_id}&msg=Đã+ghi+nhận+kết+quả+đếm+mù",
-            status_code=303,
-        )
-    except ClientApiError as exc:
-        return RedirectResponse(
-            url=f"/cycle-count?sheet_id={sheet_id}&err={exc.message}", status_code=303
-        )
+    return _submit_count(
+        request=request,
+        sheet_id=sheet_id,
+        line_id=line_id,
+        blind_counted_qty=blind_counted_qty,
+        override_reason=override_reason,
+        is_recount=(mode == "recount"),
+    )
+
+
+@router.post("/cycle-count/{sheet_id}/lines/{line_id}/recount")
+def cycle_count_recount(
+    request: Request,
+    sheet_id: str,
+    line_id: str,
+    blind_counted_qty: str = Form(...),
+    override_reason: str = Form(default=""),
+    user: dict[str, Any] = Depends(get_current_user),
+) -> Response:
+    return _submit_count(
+        request=request,
+        sheet_id=sheet_id,
+        line_id=line_id,
+        blind_counted_qty=blind_counted_qty,
+        override_reason=override_reason,
+        is_recount=True,
+    )
 
 
 @router.post("/cycle-count/{sheet_id}/close")
@@ -142,11 +182,9 @@ def cycle_count_close(
     api = ApiClient(token=get_session_token(request))
     try:
         api.post(f"/cycle-counts/{sheet_id}/close", json_data={})
-        return RedirectResponse(
-            url=f"/cycle-count?sheet_id={sheet_id}&msg=Đã+đóng+phiếu+và+mở+khóa+vị+trí",
-            status_code=303,
-        )
+        msg = quote_plus("Đã đóng phiếu và mở khóa vị trí")
+        return RedirectResponse(url=f"/cycle-count?sheet_id={sheet_id}&msg={msg}", status_code=303)
     except ClientApiError as exc:
         return RedirectResponse(
-            url=f"/cycle-count?sheet_id={sheet_id}&err={exc.message}", status_code=303
+            url=f"/cycle-count?sheet_id={sheet_id}&err={quote_plus(exc.message)}", status_code=303
         )
