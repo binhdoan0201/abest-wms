@@ -58,25 +58,40 @@
 
     <div class="space-y-3">
       {% for ln in selected_sheet.lines %}
-      <div class="p-3 border rounded-xl bg-slate-50 space-y-2">
+      {% set is_recount = (ln.status in ["COUNTED", "RECOUNTING", "NEED_INFO"] or ln.final_counted_qty is not none) %}
+      <div class="p-3.5 border rounded-xl {{ 'bg-amber-50/70 border-amber-200' if is_recount else 'bg-slate-50' }} space-y-2">
         <div class="flex justify-between text-xs text-slate-600">
           <span>Vị trí: <strong class="font-mono">{{ ln.location_id }}</strong></span>
-          <span class="px-2 py-0.5 rounded bg-white border">{{ ln.status }}</span>
+          <span class="px-2 py-0.5 rounded bg-white border font-medium">{{ ln.status }}</span>
         </div>
         <div class="text-xs text-slate-500">
           SKU: <span class="font-mono">{{ ln.sku_id or "Vị trí trống" }}</span> |
           Tồn sổ sách: <strong>{{ ln.system_qty_snapshot if ln.system_qty_snapshot is not none else "ẨN (Đếm mù)" }}</strong>
+          {% if ln.variance_qty is not none %}
+          | Chênh lệch: <strong class="text-rose-600">{{ ln.variance_qty }}</strong>
+          {% endif %}
         </div>
 
-        {% if ln.status in ["PENDING", "COUNTED", "RECOUNTING", "NEED_INFO"] %}
-        <form method="post" action="/cycle-count/{{ selected_sheet.count_sheet_id }}/lines/{{ ln.count_line_id }}/count" class="flex flex-col sm:flex-row gap-2 pt-1">
-          <input type="hidden" name="mode" value="{{ 'recount' if ln.final_counted_qty is not none else 'count' }}" />
-          <input type="text" name="blind_counted_qty" required placeholder="Nhập số lượng thực tế đếm được..." class="flex-1 rounded-lg border-slate-300 text-base py-2" />
-          <input type="text" name="override_reason" placeholder="Lý do nếu đếm lại cùng người..." class="rounded-lg border-slate-300 text-sm" />
-          <button type="submit" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-sm">
-            {{ "Ghi đếm lại" if ln.final_counted_qty is not none else "Xác nhận đếm" }}
+        {% if "KK-1" in perms and ln.status in ["PENDING", "COUNTED", "RECOUNTING", "NEED_INFO"] %}
+        {% if is_recount %}
+        <div class="text-xs font-medium text-amber-800">
+          Đếm lại dòng lệch (bắt buộc nhân viên kiểm kê khác người đếm lần trước; nếu cùng người phải nhập lý do ngoại lệ).
+        </div>
+        <form method="post" action="/cycle-count/{{ selected_sheet.count_sheet_id }}/lines/{{ ln.count_line_id }}/recount" class="flex flex-col sm:flex-row gap-2 pt-1">
+          <input type="text" name="blind_counted_qty" required placeholder="Nhập số lượng đếm lại..." class="flex-1 rounded-lg border-amber-300 bg-white text-base py-2" />
+          <input type="text" name="override_reason" placeholder="Lý do nếu đếm lại cùng người..." class="rounded-lg border-slate-300 bg-white text-sm" />
+          <button type="submit" class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg text-sm">
+            Ghi nhận đếm lại
           </button>
         </form>
+        {% else %}
+        <form method="post" action="/cycle-count/{{ selected_sheet.count_sheet_id }}/lines/{{ ln.count_line_id }}/count" class="flex flex-col sm:flex-row gap-2 pt-1">
+          <input type="text" name="blind_counted_qty" required placeholder="Nhập số lượng thực tế đếm được..." class="flex-1 rounded-lg border-slate-300 text-base py-2" />
+          <button type="submit" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-sm">
+            Xác nhận đếm
+          </button>
+        </form>
+        {% endif %}
         {% endif %}
       </div>
       {% endfor %}
