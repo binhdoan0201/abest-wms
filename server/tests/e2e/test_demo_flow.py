@@ -354,3 +354,127 @@ def test_demo_flow_erp_inbound_approval_putaway_outbound_erp() -> None:
     orders = _ok(client.get("/api/v1/dashboard/orders", headers=bgd))
     assert orders["outbound"]["gi_confirmed_today"] >= 1
     assert orders["inbound"]["grns_closed_today"] >= 1
+
+
+def test_nv_dongoi_sees_picked_order_in_packing_dropdown_real_api() -> None:
+    """Soạn xong đơn bằng API thật -> đăng nhập nv_dongoi thật -> mở /outbound/packing."""
+    from client.app.core.api_client import ApiClient
+    from client.app.main import app as client_app
+
+    thukho = _headers("thukho")
+    soan = _headers("nv_soan")
+    sku_id = _sql("SELECT sku_id FROM skus WHERE sku_code = :c", c=SKU_CODE)
+    customer = _sql("SELECT erp_customer_code FROM customers ORDER BY 1 LIMIT 1")
+    erp_order_no = f"SO-DG-{_marker}"
+
+    order = _ok(
+        client.post(
+            "/api/v1/outbound-orders",
+            headers=thukho,
+            json={
+                "erp_order_number": erp_order_no,
+                "order_type": "SALES_ORDER",
+                "warehouse_code": "WH01",
+                "customer_code": customer,
+                "lines": [
+                    {
+                        "line_number": 1,
+                        "sku_code": SKU_CODE,
+                        "uom_code": "SET",
+                        "qty_ordered": 1,
+                    }
+                ],
+            },
+        ),
+        201,
+    )
+    order_id = order["order_id"]
+    _created_docs.append(uuid.UUID(order_id))
+
+    _ok(
+        client.post(
+            f"/api/v1/outbound-orders/{order_id}/allocate",
+            headers=thukho,
+            json={"version_no": order["version_no"]},
+        )
+    )
+    pick_session = _ok(
+        client.post(
+            "/api/v1/pick-sessions",
+            headers=thukho,
+            json={
+                "warehouse_code": "WH01",
+                "picker_username": "nv_soan",
+                "order_ids": [order_id],
+            },
+        ),
+        201,
+    )
+    pick_id = pick_session["pick_session_id"]
+    _created_docs.append(uuid.UUID(pick_id))
+
+    lot_id = _sql(
+        "SELECT lot_id FROM inventory_allocations WHERE order_id = :oid LIMIT 1",
+        oid=uuid.UUID(order_id),
+    )
+    _ok(
+        client.post(
+            f"/api/v1/pick-sessions/{pick_id}/confirm",
+            headers=soan,
+            json={
+                "version_no": pick_session["version_no"],
+                "lines": [
+                    {
+                        "order_id": order_id,
+                        "sku_id": str(sku_id),
+                        "lot_id": str(lot_id),
+                        "qty_picked": "1",
+                    }
+                ],
+            },
+        )
+    )
+
+    picked_order = _ok(client.get(f"/api/v1/outbound-orders/{order_id}", headers=thukho))
+    assert picked_order["status"] == "PICKED"
+
+    orig_backend = ApiClient.backend_app
+    ApiClient.backend_app = app
+    web = TestClient(client_app, base_url="http://localhost:3000")
+    try:
+        login_resp = web.post(
+            "/auth/login",
+            data={"username": "nv_dongoi", "password": PASSWORD},
+            follow_redirects=False,
+        )
+        assert login_resp.status_code in (200, 302, 303), login_resp.text
+        page = web.get("/outbound/packing")
+        assert page.status_code == 200, page.text
+        assert erp_order_no in page.text
+    finally:
+        ApiClient.backend_app = orig_backend
+        db = SessionLocal()
+        try:
+            db.execute(
+                text("DELETE FROM pick_session_lines WHERE pick_session_id = :pid"),
+                {"pid": uuid.UUID(pick_id)},
+            )
+            db.execute(
+                text("DELETE FROM pick_sessions WHERE pick_session_id = :pid"),
+                {"pid": uuid.UUID(pick_id)},
+            )
+            db.execute(
+                text("DELETE FROM inventory_allocations WHERE order_id = :oid"),
+                {"oid": uuid.UUID(order_id)},
+            )
+            db.execute(
+                text("DELETE FROM outbound_order_lines WHERE order_id = :oid"),
+                {"oid": uuid.UUID(order_id)},
+            )
+            db.execute(
+                text("DELETE FROM outbound_orders WHERE order_id = :oid"),
+                {"oid": uuid.UUID(order_id)},
+            )
+            db.commit()
+        finally:
+            db.close()

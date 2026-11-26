@@ -122,6 +122,22 @@ class OutboundService:
         page_size: int = 20,
         access_type: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
+        allowed_dg1 = ("PICKED", "PACKING", "READY_TO_SHIP", "WAITING_WAYBILL")
+        dg1_only = "DG-1" in user_ctx.permissions and "QL-2.1" not in user_ctx.permissions
+        if dg1_only:
+            if status and status not in allowed_dg1:
+                return [], 0
+            if not status:
+                items, _ = OutboundRepository.list_orders(
+                    db=db,
+                    warehouse_id=user_ctx.warehouse_id,
+                    status=None,
+                    page=1,
+                    page_size=100,
+                )
+                filtered = [row for row in items if str(row.get("status") or "") in allowed_dg1]
+                start = (page - 1) * page_size
+                return filtered[start : start + page_size], len(filtered)
         return OutboundRepository.list_orders(
             db=db,
             warehouse_id=user_ctx.warehouse_id,
