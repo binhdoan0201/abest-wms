@@ -7,9 +7,11 @@ Quy tắc kiến trúc:
 """
 
 import uuid
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -96,6 +98,16 @@ def _require_access(access_type: str | None, allowed: tuple[str, ...]) -> None:
             message=f"Mức quyền '{access_type}' không được phép thao tác",
             http_status=403,
         )
+
+
+def _to_vn_date(raw_val: date | datetime | str) -> date:
+    vn_tz = ZoneInfo("Asia/Ho_Chi_Minh")
+    if isinstance(raw_val, datetime):
+        dt = raw_val if raw_val.tzinfo is not None else raw_val.replace(tzinfo=ZoneInfo("UTC"))
+        return dt.astimezone(vn_tz).date()
+    if isinstance(raw_val, date):
+        return raw_val
+    return datetime.fromisoformat(str(raw_val)).astimezone(vn_tz).date()
 
 
 class OutboundService:
@@ -283,7 +295,7 @@ class OutboundService:
                 )
                 cutoff_raw = order.get("cutoff_time")
                 min_expiry = (
-                    cutoff_raw.date()
+                    _to_vn_date(cutoff_raw)
                     if hasattr(cutoff_raw, "date") and cutoff_raw is not None
                     else None
                 )
