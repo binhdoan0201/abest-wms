@@ -283,3 +283,19 @@ class BoxType(Base):
     height_cm: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
     tare_weight_kg: Mapped[Decimal] = mapped_column(Numeric(8, 3), nullable=False, default=0)
     max_weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+
+
+class Vehicle(Base):
+    """Mô hình ORM bảng `vehicles_drivers` (xe và tài xế dùng khi lập GI, C-06)."""
+
+    __tablename__ = "vehicles_drivers"
+
+    vehicle_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    license_plate: Mapped[str] = mapped_column(String(30), nullable=False)
+    vehicle_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    driver_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    driver_phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    carrier_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

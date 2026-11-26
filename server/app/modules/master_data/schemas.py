@@ -259,6 +259,26 @@ class BoxTypeUpdate(_StrictModel):
     max_weight_kg: Decimal | None = Field(None, gt=0, max_digits=8, decimal_places=2)
 
 
+# --------------------------------------------------------------------------- vehicles
+class VehicleCreate(_StrictModel):
+    """Tạo xe và tài xế (gán khi lập GI)."""
+
+    license_plate: str = Field(min_length=1, max_length=30)
+    vehicle_type: str | None = Field(None, max_length=50)
+    driver_name: str = Field(min_length=1, max_length=150)
+    driver_phone: str | None = Field(None, max_length=30)
+    carrier_name: str | None = Field(None, max_length=150)
+
+
+class VehicleUpdate(_StrictModel):
+    """Sửa xe (không đổi `license_plate`)."""
+
+    vehicle_type: str | None = Field(None, max_length=50)
+    driver_name: str | None = Field(None, min_length=1, max_length=150)
+    driver_phone: str | None = Field(None, max_length=30)
+    carrier_name: str | None = Field(None, max_length=150)
+
+
 # --------------------------------------------------------------------------- warehouse config
 class ApprovalSlaHours(_StrictModel):
     """SLA duyệt (giờ) cho từng cấp D1, D2, D3."""

@@ -160,3 +160,9 @@ INSERT INTO reason_codes (reason_code, reason_category, description, is_active) 
     ('TASK_REJECT_BUSY', 'TASK_REJECT', 'Nhân viên đang thực hiện dở dang task khẩn khác', TRUE),
     ('PACKAGE_BROKEN_SEAL', 'PACKING_EXCEPTION', 'Bao bì rách niêm phong, cần kiểm tra lại', TRUE)
 ON CONFLICT (reason_code) DO NOTHING;
+
+-- Xe và tài xế mẫu (gán khi lập GI, C-06)
+INSERT INTO vehicles_drivers (vehicle_id, license_plate, vehicle_type, driver_name, driver_phone, carrier_name) VALUES
+    ('a7000000-0000-0000-0000-000000000001', '51C-123.45', 'Tải 1.5 tấn', 'Trần Văn Lái', '0912000001', 'ABEST Logistics'),
+    ('a7000000-0000-0000-0000-000000000002', '51D-678.90', 'Tải 5 tấn', 'Lê Thị Xe', '0912000002', 'Giao Nhanh Miền Nam')
+ON CONFLICT (license_plate) DO NOTHING;

@@ -2,11 +2,14 @@
 
 from urllib.parse import urlparse
 
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from client.app.core.api_client import ApiClient, ClientApiError
 from client.app.core.config import get_client_settings
+from client.app.core.session import get_session_token, set_session_cookie, token_seconds_left
 
 settings = get_client_settings()
 
@@ -76,3 +79,35 @@ class CompactCsrfMiddleware(BaseHTTPMiddleware):
                     )
 
         return await call_next(request)
+
+
+def _refresh_token(token: str) -> str | None:
+    try:
+        data = ApiClient(token=token).post("/auth/refresh").get("data") or {}
+    except ClientApiError:
+        return None
+    new_token = data.get("access_token")
+    return str(new_token) if new_token else None
+
+
+class SessionRefreshMiddleware(BaseHTTPMiddleware):
+    """Tự làm mới phiên (A-03): token còn dưới `SESSION_REFRESH_BEFORE_SECONDS` thì đổi token
+    mới qua `POST /auth/refresh` và ghi cookie mới vào phản hồi.
+
+    Token đã hết hạn thì không làm mới (người dùng bị chuyển về trang đăng nhập như cũ).
+    """
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        if request.url.path.startswith(("/static", "/login", "/logout", "/health")):
+            return response
+        token = get_session_token(request)
+        if not token:
+            return response
+        seconds_left = token_seconds_left(token)
+        if seconds_left is None or not 0 < seconds_left < settings.SESSION_REFRESH_BEFORE_SECONDS:
+            return response
+        new_token = await run_in_threadpool(_refresh_token, token)
+        if new_token:
+            set_session_cookie(response, new_token)
+        return response
