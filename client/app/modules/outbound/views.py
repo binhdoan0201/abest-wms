@@ -409,7 +409,6 @@ def outbound_pack_ship_htmx(
     api = ApiClient(token=get_session_token(request))
     flash_msg, api_error, gi_info = None, None, None
     selected_order_id = order_id.strip()
-    box_types, vehicles, packing_orders = _load_packing_lookups(api)
     try:
         if action == "package":
             payload = {"weight_kg": weight_kg, **_v(version_no)}
@@ -462,6 +461,7 @@ def outbound_pack_ship_htmx(
             }
         else:
             api_error = {"code": exc.code, "message": exc.message}
+    box_types, vehicles, packing_orders = _load_packing_lookups(api)
     ctx = {
         "request": request,
         "flash_msg": flash_msg,

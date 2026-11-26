@@ -101,9 +101,24 @@ def test_three_step_packing_gi_and_waybill_error(
     def fake_get(
         self: ApiClient, path: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        if path == "/box-types":
+            return {"data": [{"box_type_id": "b1", "box_code": "BOX-S", "box_name": "Nho"}]}
         if path == "/auth/me":
             return {
                 "data": {"username": "nv_dongoi", "role_code": "nv_dongoi", "permissions": ["DG-1"]}
+            }
+        if path.startswith("/outbound-orders") and (
+            "status=PACKING" in path or (params or {}).get("status") == "PACKING"
+        ):
+            return {
+                "data": [
+                    {
+                        "order_id": "o1",
+                        "erp_order_number": "SO-2026-101",
+                        "customer_name": "Khach Hang A",
+                        "status": "PACKING",
+                    }
+                ]
             }
         return {"data": []}
 
@@ -141,7 +156,8 @@ def test_three_step_packing_gi_and_waybill_error(
         data={"action": "package", "order_id": "o1", "box_type_id": "b1", "weight_kg": "2.5"},
         cookies=cookies,
     )
-    assert r1.status_code == 200 and "PKG-01" in r1.text
+    assert r1.status_code == 200
+    assert "SO-2026-101" in r1.text and "BOX-S" in r1.text and "PKG-01" in r1.text
     pkg_calls = [(p, d) for p, d in calls if p.endswith("/packages")]
     assert (
         len(pkg_calls) == 1
