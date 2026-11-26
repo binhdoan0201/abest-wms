@@ -1,10 +1,4 @@
-"""ABEST WMS - Hàm nhận chứng từ ERP (PO, ASN) cho module Nhập kho (Inbound).
-
-Đăng ký với `integrations.register_erp_handler` trong `inbound/__init__.py`.
-Chữ ký theo docs/api/integrations.md: handler(db, data, actor_id) -> UUID chứng từ vừa tạo.
-`data` đã chuẩn hóa: mọi UUID, số, ngày giờ đều là chuỗi. Lỗi nghiệp vụ cứ ném `BusinessError`,
-integrations ghi `FAILED_BUSINESS` và trả mã lỗi cho ERP.
-"""
+"""ABEST WMS - Hàm nhận chứng từ ERP (PO, ASN) cho module Nhập kho (Inbound)."""
 
 import uuid
 from datetime import date, datetime
@@ -60,8 +54,8 @@ def receive_purchase_order(db: Session, data: dict[str, Any], actor_id: uuid.UUI
         qty = _to_decimal(raw["qty_ordered"], "qty_ordered")
         if qty <= 0:
             raise _validation_error("qty_ordered phải lớn hơn 0")
-        get_sku(db, sku_id)  # NOT_FOUND 404 nếu SKU không tồn tại
-        convert_to_base_uom(db, sku_id, uom_code, qty)  # 422 nếu đơn vị không quy đổi được
+        get_sku(db, sku_id)
+        convert_to_base_uom(db, sku_id, uom_code, qty)
         db.add(
             POLine(
                 po_id=po.po_id,
@@ -98,6 +92,12 @@ def receive_asn(db: Session, data: dict[str, Any], actor_id: uuid.UUID) -> uuid.
                 message=f"Không tìm thấy PO {erp_po_number} trong kho nhận",
                 http_status=404,
             )
+        if supplier_id is not None and supplier_id != po.supplier_id:
+            raise BusinessError(
+                code="INBOUND_PO_ASN_MISMATCH",
+                message="Nhà cung cấp trên ASN không khớp với PO",
+                http_status=409,
+            )
         po_id = po.po_id
         supplier_id = supplier_id or po.supplier_id
 
@@ -105,9 +105,17 @@ def receive_asn(db: Session, data: dict[str, Any], actor_id: uuid.UUID) -> uuid.
     zone_id: uuid.UUID | None = None
     if data.get("assigned_dock_location_id"):
         dock_id = uuid.UUID(str(data["assigned_dock_location_id"]))
-        location = get_location(db, dock_id, warehouse_id)  # NOT_FOUND 404 nếu sai kho
+        location = get_location(db, dock_id, warehouse_id)
         raw_zone = location.get("zone_id")
-        zone_id = uuid.UUID(str(raw_zone)) if raw_zone else None
+        if raw_zone:
+            zone_id = uuid.UUID(str(raw_zone))
+            zone_type = InboundRepository.get_zone_type(db, zone_id)
+            if zone_type != "RECEIVING_DOCK":
+                raise BusinessError(
+                    code="INBOUND_INVALID_DOCK_ZONE",
+                    message="Cửa nhận chỉ định không thuộc khu vực RECEIVING_DOCK",
+                    http_status=422,
+                )
 
     pallets = data.get("expected_pallets")
     asn = Asn(

@@ -4,12 +4,24 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Integer, Numeric, String, Text, text
+from sqlalchemy import Boolean, Computed, Date, DateTime, Integer, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.app.core.database import Base
+
+GRN_STATUSES = (
+    "DRAFT",
+    "COUNTING",
+    "PENDING_D1",
+    "PENDING_D2",
+    "PENDING_D3",
+    "APPROVED",
+    "REJECTED",
+    "CLOSED",
+    "SYNCED_ERP",
+)
 
 PO_STATUSES = (
     "PENDING",
@@ -107,7 +119,11 @@ class Grn(Base):
     is_blind_receipt: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     received_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    status: Mapped[str] = mapped_column(String(10), nullable=False, default="RECEIVING")
+    status: Mapped[str] = mapped_column(
+        PG_ENUM(*GRN_STATUSES, name="grn_status_type", create_type=False),
+        nullable=False,
+        default="RECEIVING",
+    )
     has_discrepancy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     total_discrepancy_amount: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=0.00
@@ -142,7 +158,9 @@ class GrnLine(Base):
     qty_expected: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False, default=0)
     qty_actual: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False, default=0)
     qty_damaged: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False, default=0)
-    qty_variance: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    qty_variance: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 3), Computed("qty_actual - qty_expected", persisted=True), nullable=True
+    )
     variance_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     serial_numbers: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     is_quarantined: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
