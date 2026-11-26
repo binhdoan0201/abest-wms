@@ -126,7 +126,14 @@ class InboundRepository:
         if po_id is not None:
             conditions.append(Grn.po_id == po_id)
         if received_by is not None:
-            conditions.append(Grn.received_by == received_by)
+            from sqlalchemy import or_
+
+            conditions.append(
+                or_(
+                    Grn.received_by == received_by,
+                    Grn.status.in_(["PENDING_D1", "PENDING_D2", "PENDING_D3"]),
+                )
+            )
         total = db.scalar(select(func.count()).select_from(Grn).where(*conditions))
         rows = db.scalars(
             select(Grn)

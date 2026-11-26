@@ -402,7 +402,12 @@ class InboundService:
         if grn is None:
             raise BusinessError(code="NOT_FOUND", message="Không tìm thấy GRN", http_status=404)
         enforce_warehouse_scope(user, grn.warehouse_id)
-        if user.role_code == HIDE_QTY_ROLE and grn.received_by != user.user_id:
+        can_recount_view = grn.status.startswith("PENDING_D")
+        if (
+            user.role_code == HIDE_QTY_ROLE
+            and grn.received_by != user.user_id
+            and not can_recount_view
+        ):
             raise BusinessError(
                 code="FORBIDDEN",
                 message="Nhân viên nhận hàng chỉ được xem phiếu của chính mình",
@@ -428,7 +433,12 @@ class InboundService:
         if grn is None:
             raise BusinessError(code="NOT_FOUND", message="Không tìm thấy GRN", http_status=404)
         enforce_warehouse_scope(user, grn.warehouse_id)
-        if user.role_code == HIDE_QTY_ROLE and grn.received_by != user.user_id:
+        can_recount_view = grn.status.startswith("PENDING_D")
+        if (
+            user.role_code == HIDE_QTY_ROLE
+            and grn.received_by != user.user_id
+            and not can_recount_view
+        ):
             raise BusinessError(
                 code="FORBIDDEN",
                 message="Bạn chỉ được thao tác trên phiếu GRN của chính mình",
@@ -821,7 +831,12 @@ class InboundService:
         if grn is None:
             raise BusinessError(code="NOT_FOUND", message="Không tìm thấy GRN", http_status=404)
         enforce_warehouse_scope(user, grn.warehouse_id)
-        if user.role_code == HIDE_QTY_ROLE and grn.received_by != user.user_id:
+        can_recount_view = grn.status.startswith("PENDING_D")
+        if (
+            user.role_code == HIDE_QTY_ROLE
+            and grn.received_by != user.user_id
+            and not can_recount_view
+        ):
             raise BusinessError(
                 code="FORBIDDEN",
                 message="Bạn chỉ được nộp phiếu GRN của chính mình",
