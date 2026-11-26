@@ -19,7 +19,7 @@ from server.app.integrations.erp_mock import get_erp_gateway
 from server.app.integrations.tms_mock import get_tms_gateway
 from server.app.main import app
 from server.app.modules.integrations import register_erp_handler
-from server.app.modules.integrations.services import unregister_erp_handler
+from server.app.modules.integrations.services import _handlers, unregister_erp_handler
 
 client = TestClient(app)
 _created_orders: list[str] = []
@@ -44,6 +44,9 @@ def quanly() -> dict[str, str]:
 
 @pytest.fixture(autouse=True)
 def _reset_state() -> Iterator[None]:
+    # Gỡ handler thật (inbound, outbound đăng ký lúc khởi động) để test tự đăng ký handler giả,
+    # rồi trả lại sau test: nếu không, test chạy sau đẩy chứng từ ERP sẽ chỉ nhận 202 PENDING.
+    saved = {t: _handlers[t] for t in ("PO", "ASN", "SO") if t in _handlers}
     for doc_type in ("PO", "ASN", "SO"):
         unregister_erp_handler(doc_type)
     get_erp_gateway().configure_failures("NONE", 0)
@@ -51,6 +54,8 @@ def _reset_state() -> Iterator[None]:
     yield
     for doc_type in ("PO", "ASN", "SO"):
         unregister_erp_handler(doc_type)
+    for doc_type, handler in saved.items():
+        register_erp_handler(doc_type, handler)
 
 
 @pytest.fixture(scope="module", autouse=True)
