@@ -46,6 +46,7 @@
 | `customers` | `customer_id` (UUID) | toàn hệ thống | `erp_customer_code`, `customer_name` | `is_active` | `erp_customer_code` | có |
 | `reason-codes` | `reason_code` (**chuỗi**) | toàn hệ thống | `reason_code`, `description` | `reason_category`, `is_active` | `reason_code` | có |
 | `box-types` | `box_type_id` (UUID) | toàn hệ thống | `box_code`, `box_name` | (không) | `box_code` | không |
+| `vehicles` | `vehicle_id` (UUID) | toàn hệ thống | `license_plate`, `driver_name`, `carrier_name` | `is_active` | `license_plate` | có |
 
 ### Trường của từng tài nguyên
 
@@ -62,6 +63,7 @@ Ký hiệu: **bắt buộc khi tạo**, *(tạo)* chỉ đặt lúc tạo, còn 
 | `suppliers` | **`erp_supplier_code`** *(tạo)*, **`supplier_name`**, `contact_person`, `phone`, `email` |
 | `customers` | **`erp_customer_code`** *(tạo)*, **`customer_name`**, `shipping_address`, `phone` |
 | `reason-codes` | **`reason_code`** *(tạo)*, **`reason_category`**, **`description`** |
+| `vehicles` | **`license_plate`** *(tạo)*, `vehicle_type`, **`driver_name`**, `driver_phone`, `carrier_name` (xe và tài xế gán khi lập GI) |
 | `box-types` | **`box_code`** *(tạo)*, **`box_name`**, **`length_cm`**, **`width_cm`**, **`height_cm`** (> 0), `tare_weight_kg` (≥ 0, mặc định 0), `max_weight_kg` (> 0, không nhỏ hơn `tare_weight_kg`) |
 
 Giá trị hợp lệ:

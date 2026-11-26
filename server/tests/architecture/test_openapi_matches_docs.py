@@ -21,6 +21,7 @@ RESOURCES = [
     "customers",
     "reason-codes",
     "box-types",
+    "vehicles",
     "users",
     "roles",
 ]
