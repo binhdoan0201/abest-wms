@@ -70,7 +70,7 @@ def test_packing_page_loads_box_types_and_vehicles_for_dg1(
                     }
                 ]
             }
-        if path == "/outbound-orders?status=PACKING":
+        if path == "/outbound-orders" and (params or {}).get("status") == "PACKING":
             return {
                 "data": [
                     {

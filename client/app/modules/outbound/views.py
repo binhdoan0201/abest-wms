@@ -188,7 +188,9 @@ def _load_packing_lookups(
     seen: set[str] = set()
     for st in ("PICKED", "PACKING", "READY_TO_SHIP"):
         try:
-            raw_o = api.get(f"/outbound-orders?status={st}").get("data", [])
+            raw_o = api.get("/outbound-orders", params={"status": st, "page_size": 100}).get(
+                "data", []
+            )
             if isinstance(raw_o, list):
                 for row in raw_o:
                     if isinstance(row, dict):
