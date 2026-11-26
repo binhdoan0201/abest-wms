@@ -4,7 +4,7 @@
   {% if api_error %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>[{{ api_error.code }}]</strong> {{ api_error.message }}</div>{% endif %}
   {% if gi_info %}
     <div class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 space-y-1">
-      <div><strong>Phiếu GI:</strong> {{ gi_info.gi_number }} ({{ gi_info.gi_id }}) — Trạng thái đơn: <strong>{{ gi_info.order_status }}</strong></div>
+      <div><strong>Phiếu GI:</strong> {{ gi_info.gi_number }} — Trạng thái đơn: <strong>{{ gi_info.order_status }}</strong></div>
       <div><strong>Mã vận đơn TMS:</strong> {{ gi_info.waybill_text }}</div>
     </div>
   {% endif %}
@@ -48,7 +48,13 @@
     <form hx-post="/outbound/pack-and-ship" hx-target="#outbound-pack-container" hx-swap="innerHTML" class="rounded-lg border border-slate-200 p-3 space-y-2">
       <input type="hidden" name="action" value="confirm_gi" />
       <div class="font-medium text-sm text-slate-700">3. Xác nhận giao hàng (SHIPPED)</div>
-      <input type="text" name="gi_id" value="{{ gi_info.gi_id if gi_info else '' }}" placeholder="UUID Phiếu GI" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs" />
+      {% set active_gi = selected_gi_id or (gi_info.gi_id if gi_info else '') %}
+      <select name="gi_id" aria-label="Phiếu xuất kho GI" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">-- Chọn phiếu GI --</option>
+        {% for g in gi_options or [] %}
+          <option value="{{ g.id }}" {% if active_gi == g.id %}selected{% endif %}>{{ g.label }}</option>
+        {% endfor %}
+      </select>
       <input type="text" name="driver_signature_data" placeholder="Tài xế ký (nhập họ tên)" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs" />
       <button type="submit" class="w-full rounded bg-emerald-600 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Xác nhận xuất kho</button>
     </form>

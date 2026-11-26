@@ -50,6 +50,62 @@ def _load_active_reason_codes(api: ApiClient) -> list[dict[str, Any]]:
     ]
 
 
+def _format_pick_session_option(row: dict[str, Any]) -> dict[str, str]:
+    sid = str(row.get("pick_session_id") or row.get("session_id") or row.get("id") or "").strip()
+    code = str(
+        row.get("pick_session_code")
+        or row.get("session_code")
+        or row.get("pick_number")
+        or row.get("order_number")
+        or sid[:8]
+    ).strip()
+    status = str(row.get("status") or row.get("session_status") or "").strip()
+    label = f"{code} ({status})" if status else code
+    return {"id": sid, "label": label}
+
+
+def _load_pick_session_options(
+    api: ApiClient,
+    user: dict[str, Any],
+    current_session_id: str = "",
+    current_session: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+    user_id = str(user.get("user_id") or user.get("id") or user.get("sub") or "").strip()
+
+    queries: list[dict[str, Any]] = [
+        {"assigned_to_me": "true", "page_size": 100},
+        {"picker_user_id": user_id, "page_size": 100} if user_id else {"page_size": 100},
+        {"page_size": 100},
+    ]
+    for params in queries:
+        try:
+            raw = api.get("/pick-sessions", params=params).get("data", [])
+            if isinstance(raw, list) and raw:
+                for row in raw:
+                    if not isinstance(row, dict):
+                        continue
+                    opt = _format_pick_session_option(row)
+                    if opt["id"] and opt["id"] not in seen:
+                        seen.add(opt["id"])
+                        options.append(opt)
+                break
+        except ClientApiError:
+            continue
+
+    if current_session_id and current_session_id not in seen:
+        if isinstance(current_session, dict):
+            opt = _format_pick_session_option(current_session)
+            if not opt["id"]:
+                opt["id"] = current_session_id
+        else:
+            opt = {"id": current_session_id, "label": f"Phiên {current_session_id[:8]}"}
+        options.insert(0, opt)
+
+    return options
+
+
 def _render_403(
     request: Request,
     user: dict[str, Any],
@@ -77,6 +133,7 @@ def outbound_page(
     if "QL-2.1" not in perms and "SO-1" not in perms and "DG-1" not in perms:
         return _render_403(request, user, menu, "Không có quyền truy cập phân hệ Xuất kho")
     orders, pick_session, api_error = [], None, None
+    selected_session_id = (session_id or "").strip()
     if "QL-2.1" in perms:
         try:
             q = f"/outbound-orders?status={status}" if status else "/outbound-orders"
@@ -85,11 +142,16 @@ def outbound_page(
             if exc.http_status == 403:
                 return _render_403(request, user, menu, exc.message, exc.code)
             api_error = {"code": exc.code, "message": exc.message}
-    if session_id and "SO-1" in perms:
+    if selected_session_id and "SO-1" in perms:
         try:
-            pick_session = api.get(f"/pick-sessions/{session_id}").get("data")
+            pick_session = api.get(f"/pick-sessions/{selected_session_id}").get("data")
         except ClientApiError as exc:
             api_error = {"code": exc.code, "message": exc.message}
+    pick_sessions = (
+        _load_pick_session_options(api, user, selected_session_id, pick_session)
+        if "SO-1" in perms
+        else []
+    )
     return templates.TemplateResponse(
         request=request,
         name="outbound/index.html",
@@ -103,7 +165,8 @@ def outbound_page(
             "orders": orders,
             "selected_status": status or "",
             "pick_session": pick_session,
-            "session_id": session_id or "",
+            "pick_sessions": pick_sessions,
+            "session_id": selected_session_id,
             "pick_action_url": "/outbound",
             "reason_codes": _load_active_reason_codes(api),
             "api_error": api_error,
@@ -125,11 +188,13 @@ def outbound_picking_page(
     if "SO-1" not in perms:
         return _render_403(request, user, menu, "Chỉ nhân viên soạn hàng mới có quyền truy cập")
     pick_session, api_error = None, None
-    if session_id:
+    selected_session_id = (session_id or "").strip()
+    if selected_session_id:
         try:
-            pick_session = api.get(f"/pick-sessions/{session_id}").get("data")
+            pick_session = api.get(f"/pick-sessions/{selected_session_id}").get("data")
         except ClientApiError as exc:
             api_error = {"code": exc.code, "message": exc.message}
+    pick_sessions = _load_pick_session_options(api, user, selected_session_id, pick_session)
     return templates.TemplateResponse(
         request=request,
         name="outbound/picking.html",
@@ -140,7 +205,8 @@ def outbound_picking_page(
             "active_menu": "outbound",
             "perms": perms,
             "pick_session": pick_session,
-            "session_id": session_id or "",
+            "pick_sessions": pick_sessions,
+            "session_id": selected_session_id,
             "pick_action_url": "/outbound/picking",
             "api_error": api_error,
         },
@@ -167,9 +233,72 @@ def _format_packing_order_option(order: dict[str, Any]) -> dict[str, str]:
     return {"id": order_id, "label": label, "status": status}
 
 
+def _format_gi_option(gi: dict[str, Any]) -> dict[str, str]:
+    gi_id = str(gi.get("gi_id") or gi.get("goods_issue_id") or gi.get("id") or "").strip()
+    gi_no = str(
+        gi.get("gi_number") or gi.get("gi_code") or gi.get("document_number") or gi_id[:8]
+    ).strip()
+    status = str(gi.get("status") or gi.get("gi_status") or "").strip()
+    waybill = str(gi.get("tms_waybill_code") or "").strip()
+    parts = [gi_no]
+    if status:
+        parts.append(status)
+    if waybill:
+        parts.append(f"WB: {waybill}")
+    label = " – ".join(parts) if len(parts) > 1 else gi_no
+    return {"id": gi_id, "label": label, "gi_number": gi_no, "status": status}
+
+
+def _load_gi_options(
+    api: ApiClient,
+    order_id: str = "",
+    gi_info: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    candidate_calls: list[tuple[str, dict[str, Any]]] = []
+    if order_id:
+        candidate_calls.append(("/goods-issues", {"order_id": order_id, "page_size": 100}))
+        candidate_calls.append((f"/outbound-orders/{order_id}/goods-issues", {"page_size": 100}))
+    candidate_calls.append(("/goods-issues", {"page_size": 100}))
+
+    for path, params in candidate_calls:
+        try:
+            raw = api.get(path, params=params).get("data", [])
+            if isinstance(raw, list) and raw:
+                for row in raw:
+                    if not isinstance(row, dict):
+                        continue
+                    if order_id:
+                        row_oid = str(
+                            row.get("order_id") or row.get("outbound_order_id") or ""
+                        ).strip()
+                        if row_oid and row_oid != order_id:
+                            continue
+                    opt = _format_gi_option(row)
+                    if opt["id"] and opt["id"] not in seen:
+                        seen.add(opt["id"])
+                        options.append(opt)
+                if options:
+                    break
+        except ClientApiError:
+            continue
+
+    if isinstance(gi_info, dict):
+        gid = str(gi_info.get("gi_id") or "").strip()
+        if gid and gid not in seen:
+            gi_no = str(gi_info.get("gi_number") or gid[:8]).strip()
+            options.insert(0, {"id": gid, "label": gi_no, "gi_number": gi_no, "status": ""})
+
+    return options
+
+
 def _load_packing_lookups(
     api: ApiClient,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]]]:
+    selected_order_id: str = "",
+    gi_info: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]], list[dict[str, str]]]:
     boxes: list[dict[str, Any]] = []
     vehs: list[dict[str, Any]] = []
     orders: list[dict[str, str]] = []
@@ -200,7 +329,8 @@ def _load_packing_lookups(
                             orders.append(opt)
         except ClientApiError:
             pass
-    return boxes, vehs, orders
+    gi_options = _load_gi_options(api, order_id=selected_order_id, gi_info=gi_info)
+    return boxes, vehs, orders, gi_options
 
 
 @router.get("/outbound/packing", response_class=HTMLResponse)
@@ -214,7 +344,7 @@ def outbound_packing_page(
     if "DG-1" not in perms:
         return _render_403(request, user, menu, "Chỉ nhân viên đóng gói mới có quyền truy cập")
     api = ApiClient(token=get_session_token(request))
-    box_types, vehicles, packing_orders = _load_packing_lookups(api)
+    box_types, vehicles, packing_orders, gi_options = _load_packing_lookups(api)
     return get_templates(request).TemplateResponse(
         request=request,
         name="outbound/packing.html",
@@ -227,7 +357,9 @@ def outbound_packing_page(
             "box_types": box_types,
             "vehicles": vehicles,
             "packing_orders": packing_orders,
+            "gi_options": gi_options,
             "selected_order_id": "",
+            "selected_gi_id": "",
             "gi_info": None,
         },
     )
@@ -334,6 +466,7 @@ def outbound_confirm_pick_htmx(
     ctx = {
         "request": request,
         "pick_session": ps,
+        "pick_sessions": _load_pick_session_options(api, user, pick_session_id, ps),
         "session_id": pick_session_id,
         "pick_action_url": pick_action_url,
         "reason_codes": _load_active_reason_codes(api),
@@ -383,6 +516,7 @@ def outbound_exception_pick_htmx(
     ctx = {
         "request": request,
         "pick_session": ps,
+        "pick_sessions": _load_pick_session_options(api, user, pick_session_id, ps),
         "session_id": pick_session_id,
         "pick_action_url": pick_action_url,
         "reason_codes": _load_active_reason_codes(api),
@@ -411,6 +545,7 @@ def outbound_pack_ship_htmx(
     api = ApiClient(token=get_session_token(request))
     flash_msg, api_error, gi_info = None, None, None
     selected_order_id = order_id.strip()
+    selected_gi_id = gi_id.strip()
     try:
         if action == "package":
             payload = {"weight_kg": weight_kg, **_v(version_no)}
@@ -428,16 +563,17 @@ def outbound_pack_ship_htmx(
             res = api.post("/goods-issues", json_data=payload).get("data", {})
             wb_text = res.get("tms_waybill_code") or "chờ vận đơn"
             ord_status = res.get("order_status") or res.get("status") or ""
+            created_gi_id = str(res.get("gi_id") or "").strip()
+            created_gi_no = str(res.get("gi_number") or "").strip()
             gi_info = {
-                "gi_id": res.get("gi_id", ""),
-                "gi_number": res.get("gi_number", ""),
+                "gi_id": created_gi_id,
+                "gi_number": created_gi_no,
                 "order_status": ord_status,
                 "waybill_text": wb_text,
             }
-            flash_msg = (
-                f"Đã lập phiếu GI {res.get('gi_number', '')} "
-                f"({res.get('gi_id', '')}) — Vận đơn TMS: {wb_text}"
-            )
+            if created_gi_id:
+                selected_gi_id = created_gi_id
+            flash_msg = f"Đã lập phiếu GI {created_gi_no} — Vận đơn TMS: {wb_text}"
         elif action == "confirm_gi":
             signer = driver_signature_data.strip()
             if not signer:
@@ -447,7 +583,7 @@ def outbound_pack_ship_htmx(
                 }
             else:
                 res = api.post(
-                    f"/goods-issues/{gi_id.strip()}/confirm",
+                    f"/goods-issues/{selected_gi_id}/confirm",
                     json_data={"driver_signature_data": signer, **_v(version_no)},
                 ).get("data", {})
                 final_status = res.get("order_status") or res.get("status") or ""
@@ -463,7 +599,9 @@ def outbound_pack_ship_htmx(
             }
         else:
             api_error = {"code": exc.code, "message": exc.message}
-    box_types, vehicles, packing_orders = _load_packing_lookups(api)
+    box_types, vehicles, packing_orders, gi_options = _load_packing_lookups(
+        api, selected_order_id=selected_order_id, gi_info=gi_info
+    )
     ctx = {
         "request": request,
         "flash_msg": flash_msg,
@@ -471,7 +609,9 @@ def outbound_pack_ship_htmx(
         "box_types": box_types,
         "vehicles": vehicles,
         "packing_orders": packing_orders,
+        "gi_options": gi_options,
         "selected_order_id": selected_order_id,
+        "selected_gi_id": selected_gi_id,
         "gi_info": gi_info,
     }
     return get_templates(request).TemplateResponse(

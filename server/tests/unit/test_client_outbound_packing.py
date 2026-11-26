@@ -177,7 +177,7 @@ def test_three_step_packing_gi_and_waybill_error(
         and "chờ vận đơn" in r2.text
         and "WAITING_WAYBILL" in r2.text
     )
-    assert 'name="gi_id" value="gi-1"' in r2.text
+    assert 'name="gi_id"' in r2.text and ('value="gi-1"' in r2.text and "selected" in r2.text)
     gi_payload = [(p, d) for p, d in calls if p == "/goods-issues"][0][1]
     assert gi_payload is not None and gi_payload["vehicle_id"] == "v1"
 
