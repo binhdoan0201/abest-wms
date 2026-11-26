@@ -31,6 +31,14 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, description="Mật khẩu người dùng")
 
 
+class RefreshResponseData(BaseModel):
+    """Token mới khi làm mới phiên."""
+
+    access_token: str
+    token_type: str = "Bearer"
+    expires_in_hours: int = 8
+
+
 class LoginResponseData(BaseModel):
     """Dữ liệu trả về khi đăng nhập thành công."""
 

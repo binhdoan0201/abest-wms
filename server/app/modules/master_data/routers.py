@@ -1,7 +1,7 @@
 """ABEST WMS - Routers cho Phân hệ Dữ liệu nguồn (Master Data).
 
 Khai báo endpoint theo Mục 4.2 Chuẩn API và hợp đồng `docs/api/master_data.md`:
-- 10 danh mục, mỗi danh mục 5 endpoint: GET /{res}, GET /{res}/{id}, POST /{res},
+- 11 danh mục (thêm `vehicles`), mỗi danh mục 5 endpoint: GET /{res}, GET /{res}/{id}, POST /{res},
   PATCH /{res}/{id}, POST /{res}/{id}/deactivate. Đọc: mọi vai trò đã đăng nhập; ghi: `AD-1`.
 - Cấu hình kho: GET, PATCH /warehouses/{id}/config.
 - `GET /users` (chỉ đọc): `admin` xem mọi kho; `thukho`, `quanly` (TK-1.1) xem người trong kho
@@ -34,6 +34,8 @@ from server.app.modules.master_data.schemas import (
     SkuUpdate,
     SupplierCreate,
     SupplierUpdate,
+    VehicleCreate,
+    VehicleUpdate,
     WarehouseConfigUpdate,
     WarehouseCreate,
     WarehouseUpdate,
@@ -59,6 +61,7 @@ MASTER_DATA_RESOURCES: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "customers": (CustomerCreate, CustomerUpdate),
     "reason-codes": (ReasonCodeCreate, ReasonCodeUpdate),
     "box-types": (BoxTypeCreate, BoxTypeUpdate),
+    "vehicles": (VehicleCreate, VehicleUpdate),
 }
 
 

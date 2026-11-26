@@ -27,7 +27,7 @@ Không có endpoint ghi tồn kho công khai qua HTTP: Mọi biến động tồ
 
 ### 3. GET /api/v1/lots
 - **Mục đích:** Danh sách các lô hàng, ngày sản xuất, hạn sử dụng và cảnh báo cận date.
-- **Vai trò:** `thukho`, `quanly`, `nv-cat`, `nv-soan` (QL-1.1).
+- **Vai trò:** mọi vai trò có QL-1.1 (nhân viên trừ `nv-kiemke`, `thukho`, `quanly`, `bgd`); `nv-kiemke` và `admin` bị chặn.
 - **Phản hồi 200:** Danh sách lô hàng.
 - **Lỗi:** FORBIDDEN 403.
 
@@ -45,6 +45,6 @@ Không có endpoint ghi tồn kho công khai qua HTTP: Mọi biến động tồ
 
 ### 6. GET /api/v1/locations/{id}/stock
 - **Mục đích:** Tra cứu hàng hóa và pallet đang lưu trữ thực tế tại một vị trí ô kệ.
-- **Vai trò:** `thukho`, `quanly`, `nv-cat`, `nv-soan` (QL-1.1).
+- **Vai trò:** mọi vai trò có QL-1.1 (nhân viên trừ `nv-kiemke`, `thukho`, `quanly`, `bgd`); `nv-kiemke` và `admin` bị chặn.
 - **Phản hồi 200:** Danh sách tồn kho tại vị trí chỉ định.
 - **Lỗi:** NOT_FOUND 404, FORBIDDEN 403.

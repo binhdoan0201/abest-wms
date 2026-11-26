@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from client.app.core.api_client import ClientApiError
 from client.app.core.auth_guard import NeedAuthException, get_optional_user, home_path
 from client.app.core.config import get_client_settings
-from client.app.core.middleware import CompactCsrfMiddleware
+from client.app.core.middleware import CompactCsrfMiddleware, SessionRefreshMiddleware
 from client.app.modules.approvals import router as approvals_router
 from client.app.modules.auth import router as auth_router
 from client.app.modules.cycle_count import router as cycle_count_router
@@ -46,6 +46,7 @@ def create_client_app() -> FastAPI:
 
     # 2. Đăng ký Middleware An ninh & CSRF bản gọn
     app.add_middleware(CompactCsrfMiddleware)
+    app.add_middleware(SessionRefreshMiddleware)
 
     # 3. Đăng ký Exception Handlers
     @app.exception_handler(NeedAuthException)

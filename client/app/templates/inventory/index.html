@@ -12,24 +12,66 @@
                 <span>Bảng Cân Đối Tồn Kho</span>
             </h1>
             <p class="text-xs sm:text-sm text-slate-500 mt-0.5">
-                Xem chi tiết số lượng tồn khả dụng, tạm giữ và thực tế tại các vị trí lưu kho.
+                Tồn theo SKU, vị trí, lô và hạn dùng; lịch sử biến động tồn cho thủ kho, quản lý.
             </p>
         </div>
-
-        <!-- Refresh Button with HTMX -->
-        <div>
-            <button hx-post="/inventory/refresh" 
-                    hx-target="#table-container" 
-                    hx-swap="innerHTML" 
-                    hx-indicator="#refresh-indicator"
-                    class="w-full sm:w-auto bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-4 py-2.5 rounded-xl border border-indigo-200 text-xs sm:text-sm transition flex items-center justify-center gap-2 shadow-sm">
-                <span id="refresh-indicator" class="htmx-indicator animate-spin">🔄</span>
-                <span>Làm Mới Dữ Liệu</span>
-            </button>
-        </div>
+        {% if tab == "balances" %}
+        <button hx-post="/inventory/refresh"
+                hx-include="#inventory-filters"
+                hx-target="#table-container"
+                hx-swap="innerHTML"
+                hx-indicator="#refresh-indicator"
+                class="w-full sm:w-auto bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-4 py-2.5 rounded-xl border border-indigo-200 text-xs sm:text-sm transition flex items-center justify-center gap-2 shadow-sm">
+            <span id="refresh-indicator" class="htmx-indicator animate-spin">🔄</span>
+            <span>Làm Mới Dữ Liệu</span>
+        </button>
+        {% endif %}
     </div>
 
-    <!-- Error Alert If 403 or 409 Raised -->
+    <!-- Bộ lọc -->
+    <form id="inventory-filters" method="get" action="/inventory"
+          class="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+        <input type="hidden" name="tab" value="{{ tab }}">
+        <label class="text-xs font-semibold text-slate-600">SKU
+            <select name="sku_id" class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm">
+                <option value="">Tất cả</option>
+                {% for s in sku_options %}
+                <option value="{{ s.sku_id }}" {% if filters.sku_id == s.sku_id %}selected{% endif %}>{{ s.sku_code }} – {{ s.sku_name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="text-xs font-semibold text-slate-600">Vị trí
+            <select name="location_id" class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" {% if tab == "history" %}disabled{% endif %}>
+                <option value="">Tất cả</option>
+                {% for loc in location_options %}
+                <option value="{{ loc.location_id }}" {% if filters.location_id == loc.location_id %}selected{% endif %}>{{ loc.location_code }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="text-xs font-semibold text-slate-600">Lô
+            <select name="lot_id" class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" {% if tab == "history" %}disabled{% endif %}>
+                <option value="">Tất cả</option>
+                {% for lot in lot_options %}
+                <option value="{{ lot.lot_id }}" {% if filters.lot_id == lot.lot_id %}selected{% endif %}>{{ lot.lot_number }}{% if lot.expiry_date %} (HSD {{ lot.expiry_date }}){% endif %}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <div class="flex gap-2">
+            <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-lg text-sm">Lọc</button>
+            <a href="/inventory?tab={{ tab }}" class="flex-1 text-center bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-4 py-2 rounded-lg text-sm">Xóa lọc</a>
+        </div>
+    </form>
+
+    {% if can_history %}
+    <!-- Tab -->
+    <nav class="flex gap-2 text-sm" aria-label="Chế độ xem tồn kho">
+        <a href="/inventory?tab=balances&sku_id={{ filters.sku_id }}&location_id={{ filters.location_id }}&lot_id={{ filters.lot_id }}"
+           class="px-4 py-2 rounded-xl font-semibold {% if tab == 'balances' %}bg-indigo-600 text-white{% else %}bg-white border border-slate-200 text-slate-600{% endif %}">Số dư</a>
+        <a href="/inventory?tab=history&sku_id={{ filters.sku_id }}"
+           class="px-4 py-2 rounded-xl font-semibold {% if tab == 'history' %}bg-indigo-600 text-white{% else %}bg-white border border-slate-200 text-slate-600{% endif %}">Lịch sử giao dịch</a>
+    </nav>
+    {% endif %}
+
     {% if api_error %}
     <div class="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-r-xl shadow-sm" role="alert">
         <div class="flex items-start">
@@ -42,9 +84,44 @@
     </div>
     {% endif %}
 
-    <!-- Dynamic Table Container -->
+    {% if tab == "history" %}
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table class="min-w-full divide-y divide-slate-200 text-left text-xs sm:text-sm">
+            <caption class="sr-only">Lịch sử giao dịch tồn kho, mới nhất trước</caption>
+            <thead class="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                <tr>
+                    <th scope="col" class="px-3 py-3">Thời điểm</th>
+                    <th scope="col" class="px-3 py-3">Loại</th>
+                    <th scope="col" class="px-3 py-3">SKU</th>
+                    <th scope="col" class="px-3 py-3">Lô</th>
+                    <th scope="col" class="px-3 py-3">Từ</th>
+                    <th scope="col" class="px-3 py-3">Đến</th>
+                    <th scope="col" class="px-3 py-3 text-right">Số lượng</th>
+                    <th scope="col" class="px-3 py-3">Chứng từ</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for t in history %}
+                <tr>
+                    <td class="px-3 py-2 whitespace-nowrap text-slate-600">{{ t.when }}</td>
+                    <td class="px-3 py-2 whitespace-nowrap font-medium">{{ t.tx_label }}</td>
+                    <td class="px-3 py-2 font-mono text-indigo-700">{{ t.sku_code }}</td>
+                    <td class="px-3 py-2 font-mono">{{ t.lot_number }}</td>
+                    <td class="px-3 py-2 font-mono text-slate-600">{{ t.from_code }}</td>
+                    <td class="px-3 py-2 font-mono text-slate-600">{{ t.to_code }}</td>
+                    <td class="px-3 py-2 text-right font-mono font-bold {% if t.positive %}text-emerald-600{% else %}text-rose-600{% endif %}">{{ t.qty_change }}</td>
+                    <td class="px-3 py-2 text-slate-500">{{ t.ref_doc_type }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="px-4 py-8 text-center text-slate-400">Chưa có giao dịch nào.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
     <div id="table-container">
         {% include "inventory/_table.html" %}
     </div>
+    {% endif %}
 </div>
 {% endblock %}

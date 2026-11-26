@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -16,8 +17,22 @@ from server.app.modules.auth.schemas import (
     LoginResponseData,
     MessageResponse,
     PermissionItem,
+    RefreshResponseData,
     UserMeResponse,
 )
+
+TOKEN_HOURS = 8
+
+
+def _issue_token(user: Any) -> str:
+    """JWT HS256 cho người dùng (dùng chung cho đăng nhập và làm mới phiên)."""
+    payload = {
+        "sub": str(user.user_id),
+        "username": user.username,
+        "role_code": user.role.role_code,
+        "warehouse_id": str(user.primary_warehouse_id) if user.primary_warehouse_id else None,
+    }
+    return create_access_token(payload, expires_delta=timedelta(hours=TOKEN_HOURS))
 
 
 class AuthService:
@@ -84,13 +99,7 @@ class AuthService:
         )
 
         # Sinh JWT HS256 với thời hạn 8 giờ theo đúng yêu cầu
-        token_payload = {
-            "sub": str(user.user_id),
-            "username": user.username,
-            "role_code": user.role.role_code,
-            "warehouse_id": str(user.primary_warehouse_id) if user.primary_warehouse_id else None,
-        }
-        token = create_access_token(token_payload, expires_delta=timedelta(hours=8))
+        token = _issue_token(user)
 
         # Bắt buộc ghi audit log cho hành động LOGIN
         create_audit_log(
@@ -108,6 +117,39 @@ class AuthService:
             expires_in_hours=8,
             user=user_me,
         )
+
+    @staticmethod
+    def refresh(
+        db: Session, user_ctx: UserContext, client_ip: str | None = None
+    ) -> RefreshResponseData:
+        """Cấp token mới 8 giờ từ token còn hạn (A-03).
+
+        Kiểm tra lại tài khoản: bị khóa hoặc ngưng hoạt động sau khi đăng nhập thì không gia hạn.
+        Vai trò, kho lấy lại từ CSDL nên thay đổi phân quyền có hiệu lực ở lần làm mới kế tiếp.
+        """
+        user = AuthRepository.get_user_by_id(db, user_ctx.user_id)
+        if not user:
+            raise BusinessError(
+                code="AUTH_INVALID_TOKEN",
+                message="Tài khoản không còn tồn tại",
+                http_status=401,
+            )
+        if user.status != "ACTIVE":
+            raise BusinessError(
+                code="AUTH_ACCOUNT_LOCKED",
+                message="Tài khoản hiện đang bị khóa hoặc ngưng hoạt động",
+                http_status=403,
+            )
+        token = _issue_token(user)
+        create_audit_log(
+            db,
+            action_code="TOKEN_REFRESH",
+            entity_name="users",
+            actor_user_id=user.user_id,
+            warehouse_id=user.primary_warehouse_id,
+            ip_address=client_ip,
+        )
+        return RefreshResponseData(access_token=token, expires_in_hours=TOKEN_HOURS)
 
     @staticmethod
     def get_me(db: Session, user_ctx: UserContext) -> UserMeResponse:
