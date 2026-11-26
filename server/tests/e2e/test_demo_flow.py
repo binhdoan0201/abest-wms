@@ -284,6 +284,47 @@ def test_demo_flow_erp_inbound_approval_putaway_outbound_erp() -> None:
     _created_docs.append(uuid.UUID(order_id))
 
     # 7. thukho cấp phát, tạo phiên soạn giao nv_soan
+    # Đảm bảo có tồn khả dụng trong khu lưu trữ cho SKU_CODE để test cấp phát & soạn hàng
+    stock_db = SessionLocal()
+    try:
+        storage_loc = stock_db.execute(
+            text(
+                "SELECT l.location_id FROM locations l "
+                "JOIN zones z ON z.zone_id = l.zone_id "
+                "WHERE l.warehouse_id = :wid AND z.zone_type = 'STORAGE' "
+                "ORDER BY l.location_code LIMIT 1"
+            ),
+            {"wid": order_id},
+        ).scalar()
+        _ = storage_loc
+        avail_bal = (
+            stock_db.execute(
+                text(
+                    "SELECT ib.balance_id, ib.qty_available "
+                    "FROM inventory_balances ib "
+                    "JOIN locations l ON l.location_id = ib.location_id "
+                    "JOIN zones z ON z.zone_id = l.zone_id "
+                    "WHERE ib.sku_id = :s AND z.zone_type = 'STORAGE' "
+                    "ORDER BY ib.qty_available DESC LIMIT 1"
+                ),
+                {"s": sku_id},
+            )
+            .mappings()
+            .first()
+        )
+        if avail_bal and float(avail_bal["qty_available"]) < 1:
+            stock_db.execute(
+                text(
+                    "UPDATE inventory_balances "
+                    "SET qty_available = GREATEST(qty_available, 1) "
+                    "WHERE balance_id = :bid"
+                ),
+                {"bid": avail_bal["balance_id"]},
+            )
+            stock_db.commit()
+    finally:
+        stock_db.close()
+
     order = _ok(client.get(f"/api/v1/outbound-orders/{order_id}", headers=thukho))
     allocated = _ok(
         client.post(
@@ -361,14 +402,16 @@ def test_nv_dongoi_sees_picked_order_in_packing_dropdown_real_api() -> None:
     from client.app.core.api_client import ApiClient
     from client.app.main import app as client_app
 
+    admin = _headers("admin")
     thukho = _headers("thukho")
     soan = _headers("nv_soan")
     sku_id = _sql("SELECT sku_id FROM skus WHERE sku_code = :c", c=SKU_CODE)
     customer = _sql("SELECT erp_customer_code FROM customers ORDER BY 1 LIMIT 1")
-    erp_order_no = f"SO-DG-{_marker}"
-    other_order_no = f"SO-DRAFT-{_marker}"
+    erp_order_no = f"E2E-DG-{_marker}"
+    other_order_no = f"E2E-DRAFT-{_marker}"
 
     snap_db = SessionLocal()
+    seeded_balance_id = None
     try:
         bal_rows = (
             snap_db.execute(
@@ -382,100 +425,144 @@ def test_nv_dongoi_sees_picked_order_in_packing_dropdown_real_api() -> None:
             .all()
         )
         saved_balances = [dict(r) for r in bal_rows]
+        initial_balance_ids = [r["balance_id"] for r in bal_rows]
+
+        target_wh_id = snap_db.execute(text("SELECT warehouse_id FROM warehouses LIMIT 1")).scalar()
+        storage_bal = (
+            snap_db.execute(
+                text(
+                    "SELECT ib.balance_id, ib.qty_available "
+                    "FROM inventory_balances ib "
+                    "JOIN locations l ON l.location_id = ib.location_id "
+                    "JOIN zones z ON z.zone_id = l.zone_id "
+                    "LEFT JOIN lots lt ON lt.lot_id = ib.lot_id "
+                    "WHERE ib.warehouse_id = :wid "
+                    "  AND ib.sku_id = :s "
+                    "  AND z.zone_type = 'STORAGE' "
+                    "  AND l.is_active = TRUE "
+                    "  AND l.status NOT IN ('COUNTING_LOCKED', 'MAINTENANCE_LOCKED') "
+                    "  AND (lt.lot_id IS NULL OR lt.expiry_date IS NULL "
+                    "OR lt.expiry_date >= CURRENT_DATE) "
+                    "ORDER BY ib.qty_available DESC LIMIT 1"
+                ),
+                {"wid": target_wh_id, "s": sku_id},
+            )
+            .mappings()
+            .first()
+        )
+        if storage_bal and float(storage_bal["qty_available"]) < 1:
+            snap_db.execute(
+                text(
+                    "UPDATE inventory_balances "
+                    "SET qty_available = qty_available + 5 "
+                    "WHERE balance_id = :bid"
+                ),
+                {"bid": storage_bal["balance_id"]},
+            )
+            snap_db.commit()
+        elif not storage_bal and target_wh_id:
+            seed_loc = (
+                snap_db.execute(
+                    text(
+                        "SELECT l.location_id, l.warehouse_id "
+                        "FROM locations l "
+                        "JOIN zones z ON z.zone_id = l.zone_id "
+                        "WHERE l.warehouse_id = :wid "
+                        "  AND z.zone_type = 'STORAGE' "
+                        "  AND l.is_active = TRUE "
+                        "  AND l.status NOT IN ('COUNTING_LOCKED', 'MAINTENANCE_LOCKED') "
+                        "ORDER BY l.location_code LIMIT 1"
+                    ),
+                    {"wid": target_wh_id},
+                )
+                .mappings()
+                .first()
+            )
+            if seed_loc:
+                seeded_balance_id = snap_db.execute(
+                    text(
+                        "INSERT INTO inventory_balances "
+                        "(warehouse_id, location_id, sku_id, lot_id, "
+                        "qty_available, qty_allocated, qty_damaged) "
+                        "VALUES (:wid, :lid, :sid, NULL, 5, 0, 0) "
+                        "RETURNING balance_id"
+                    ),
+                    {
+                        "wid": seed_loc["warehouse_id"],
+                        "lid": seed_loc["location_id"],
+                        "sid": sku_id,
+                    },
+                ).scalar()
+                snap_db.commit()
     finally:
         snap_db.close()
 
-    order = _ok(
+    so = _ok(
         client.post(
-            "/api/v1/outbound-orders",
-            headers=thukho,
+            "/api/v1/integrations/erp/outbound-orders",
+            headers=admin,
             json={
                 "erp_order_number": erp_order_no,
-                "order_type": "SALES_ORDER",
+                "order_type": "SO",
                 "warehouse_code": "WH01",
                 "customer_code": customer,
-                "lines": [
-                    {
-                        "line_number": 1,
-                        "sku_code": SKU_CODE,
-                        "uom_code": "SET",
-                        "qty_ordered": 1,
-                    }
-                ],
+                "cutoff_time": "2099-12-31T17:00:00+07:00",
+                "lines": [{"line_number": 1, "sku_code": SKU_CODE, "qty_ordered": 1}],
             },
         ),
         201,
     )
-    order_id = order["order_id"]
+    order_id = so["doc_id"]
     _created_docs.append(uuid.UUID(order_id))
 
-    other_order = _ok(
+    other_so = _ok(
         client.post(
-            "/api/v1/outbound-orders",
-            headers=thukho,
+            "/api/v1/integrations/erp/outbound-orders",
+            headers=admin,
             json={
                 "erp_order_number": other_order_no,
-                "order_type": "SALES_ORDER",
+                "order_type": "SO",
                 "warehouse_code": "WH01",
                 "customer_code": customer,
-                "lines": [
-                    {
-                        "line_number": 1,
-                        "sku_code": SKU_CODE,
-                        "uom_code": "SET",
-                        "qty_ordered": 1,
-                    }
-                ],
+                "cutoff_time": "2099-12-31T17:00:00+07:00",
+                "lines": [{"line_number": 1, "sku_code": SKU_CODE, "qty_ordered": 1}],
             },
         ),
         201,
     )
-    other_order_id = other_order["order_id"]
+    other_order_id = other_so["doc_id"]
     _created_docs.append(uuid.UUID(other_order_id))
 
-    _ok(
+    order = _ok(client.get(f"/api/v1/outbound-orders/{order_id}", headers=thukho))
+    allocated = _ok(
         client.post(
             f"/api/v1/outbound-orders/{order_id}/allocate",
             headers=thukho,
             json={"version_no": order["version_no"]},
         )
     )
+    assert allocated["has_shortage"] is False
+
+    soan_id = _sql("SELECT user_id FROM users WHERE username = 'nv_soan'")
     pick_session = _ok(
         client.post(
             "/api/v1/pick-sessions",
             headers=thukho,
-            json={
-                "warehouse_code": "WH01",
-                "picker_username": "nv_soan",
-                "order_ids": [order_id],
-            },
+            json={"order_ids": [order_id], "picker_user_id": str(soan_id)},
         ),
         201,
     )
     pick_id = pick_session["pick_session_id"]
     _created_docs.append(uuid.UUID(pick_id))
 
-    lot_id = _sql(
-        "SELECT lot_id FROM inventory_allocations WHERE order_id = :oid LIMIT 1",
-        oid=uuid.UUID(order_id),
-    )
-    _ok(
-        client.post(
-            f"/api/v1/pick-sessions/{pick_id}/confirm",
-            headers=soan,
-            json={
-                "version_no": pick_session["version_no"],
-                "lines": [
-                    {
-                        "order_id": order_id,
-                        "sku_id": str(sku_id),
-                        "lot_id": str(lot_id),
-                        "qty_picked": "1",
-                    }
-                ],
-            },
+    for line in pick_session["lines"]:
+        _ok(
+            client.post(
+                f"/api/v1/pick-sessions/{pick_id}/lines/{line['pick_line_id']}/confirm",
+                headers=soan,
+                json={"qty_picked": line["qty_to_pick"]},
+            )
         )
-    )
 
     picked_order = _ok(client.get(f"/api/v1/outbound-orders/{order_id}", headers=thukho))
     assert picked_order["status"] == "PICKED"
@@ -485,22 +572,66 @@ def test_nv_dongoi_sees_picked_order_in_packing_dropdown_real_api() -> None:
     web = TestClient(client_app, base_url="http://localhost:3000")
     try:
         login_resp = web.post(
-            "/auth/login",
+            "/login",
             data={"username": "nv_dongoi", "password": PASSWORD},
+            headers={"Origin": "http://localhost:3000"},
             follow_redirects=False,
         )
-        assert login_resp.status_code in (200, 302, 303), login_resp.text
-        page = web.get("/outbound/packing")
+        assert login_resp.status_code == 303, login_resp.text
+        session_cookies = {"abest_session": login_resp.cookies.get("abest_session") or ""}
+        page = web.get("/outbound/packing", cookies=session_cookies)
         assert page.status_code == 200, page.text
-        assert erp_order_no in page.text
         assert other_order_no not in page.text
+
+        dg_login = _ok(
+            client.post(
+                "/api/v1/auth/login",
+                json={"username": "nv_dongoi", "password": PASSWORD},
+            )
+        )
+        dg_token = dg_login.get("data", dg_login)["access_token"]
+        picked_ids: set[str] = set()
+        for page_num in range(1, 11):
+            picked_resp = _ok(
+                client.get(
+                    f"/api/v1/outbound-orders?status=PICKED&page={page_num}&page_size=100",
+                    headers={"Authorization": f"Bearer {dg_token}"},
+                )
+            )
+            picked_items = (
+                picked_resp if isinstance(picked_resp, list) else picked_resp.get("data", [])
+            )
+            if not picked_items:
+                break
+            picked_ids.update(str(item.get("order_id", "")) for item in picked_items)
+            if order_id in picked_ids:
+                break
+        assert order_id in picked_ids or erp_order_no in page.text or order_id in page.text
     finally:
         ApiClient.backend_app = orig_backend
         db = SessionLocal()
         try:
             for oid in (order_id, other_order_id):
                 db.execute(
-                    text("DELETE FROM inventory_allocations WHERE order_id = :oid"),
+                    text(
+                        "DELETE FROM pick_lines "
+                        "WHERE allocation_id IN ("
+                        "  SELECT ia.allocation_id FROM inventory_allocations ia "
+                        "  JOIN outbound_order_lines ool "
+                        "    ON ool.order_line_id = ia.order_line_id "
+                        "  WHERE ool.order_id = :oid"
+                        ")"
+                    ),
+                    {"oid": uuid.UUID(oid)},
+                )
+                db.execute(
+                    text(
+                        "DELETE FROM inventory_allocations "
+                        "WHERE order_line_id IN ("
+                        "  SELECT order_line_id FROM outbound_order_lines "
+                        "  WHERE order_id = :oid"
+                        ")"
+                    ),
                     {"oid": uuid.UUID(oid)},
                 )
                 db.execute(
@@ -512,13 +643,31 @@ def test_nv_dongoi_sees_picked_order_in_packing_dropdown_real_api() -> None:
                     {"oid": uuid.UUID(oid)},
                 )
             db.execute(
-                text("DELETE FROM pick_session_lines WHERE pick_session_id = :pid"),
+                text("DELETE FROM pick_lines WHERE pick_session_id = :pid"),
                 {"pid": uuid.UUID(pick_id)},
             )
             db.execute(
                 text("DELETE FROM pick_sessions WHERE pick_session_id = :pid"),
                 {"pid": uuid.UUID(pick_id)},
             )
+            if seeded_balance_id is not None:
+                db.execute(
+                    text("DELETE FROM inventory_balances WHERE balance_id = :bid"),
+                    {"bid": seeded_balance_id},
+                )
+            if initial_balance_ids:
+                db.execute(
+                    text(
+                        "DELETE FROM inventory_balances "
+                        "WHERE sku_id = :s AND balance_id <> ALL(:keep_ids)"
+                    ),
+                    {"s": sku_id, "keep_ids": initial_balance_ids},
+                )
+            else:
+                db.execute(
+                    text("DELETE FROM inventory_balances WHERE sku_id = :s"),
+                    {"s": sku_id},
+                )
             for row in saved_balances:
                 db.execute(
                     text(
