@@ -147,13 +147,34 @@ def outbound_picking_page(
     )
 
 
-def _load_packing_lookups(api: ApiClient) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _format_packing_order_option(order: dict[str, Any]) -> dict[str, str]:
+    order_id = str(order.get("order_id") or order.get("outbound_order_id") or order.get("id") or "")
+    order_no = str(
+        order.get("erp_order_number")
+        or order.get("order_number")
+        or order.get("order_code")
+        or order_id[:8]
+    )
+    customer = str(
+        order.get("customer_name")
+        or order.get("customer")
+        or order.get("receiver_name")
+        or order.get("ship_to_name")
+        or ""
+    ).strip()
+    label = f"{order_no} – {customer}" if customer else order_no
+    status = str(order.get("status") or order.get("order_status") or "")
+    return {"id": order_id, "label": label, "status": status}
+
+
+def _load_packing_lookups(
+    api: ApiClient,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]]]:
     boxes: list[dict[str, Any]] = []
     vehs: list[dict[str, Any]] = []
+    orders: list[dict[str, str]] = []
     try:
-        raw_b = api.get("/box-types", params={"is_active": "true", "page_size": 100}).get(
-            "data", []
-        )
+        raw_b = api.get("/box-types", params={"page_size": 100}).get("data", [])
         if isinstance(raw_b, list):
             boxes = raw_b
     except ClientApiError:
@@ -164,7 +185,20 @@ def _load_packing_lookups(api: ApiClient) -> tuple[list[dict[str, Any]], list[di
             vehs = raw_v
     except ClientApiError:
         pass
-    return boxes, vehs
+    seen: set[str] = set()
+    for st in ("PICKED", "PACKING", "READY_TO_SHIP"):
+        try:
+            raw_o = api.get(f"/outbound-orders?status={st}").get("data", [])
+            if isinstance(raw_o, list):
+                for row in raw_o:
+                    if isinstance(row, dict):
+                        opt = _format_packing_order_option(row)
+                        if opt["id"] and opt["id"] not in seen:
+                            seen.add(opt["id"])
+                            orders.append(opt)
+        except ClientApiError:
+            pass
+    return boxes, vehs, orders
 
 
 @router.get("/outbound/packing", response_class=HTMLResponse)
@@ -178,7 +212,7 @@ def outbound_packing_page(
     if "DG-1" not in perms:
         return _render_403(request, user, menu, "Chỉ nhân viên đóng gói mới có quyền truy cập")
     api = ApiClient(token=get_session_token(request))
-    box_types, vehicles = _load_packing_lookups(api)
+    box_types, vehicles, packing_orders = _load_packing_lookups(api)
     return get_templates(request).TemplateResponse(
         request=request,
         name="outbound/packing.html",
@@ -190,6 +224,8 @@ def outbound_packing_page(
             "perms": perms,
             "box_types": box_types,
             "vehicles": vehicles,
+            "packing_orders": packing_orders,
+            "selected_order_id": "",
             "gi_info": None,
         },
     )
@@ -372,7 +408,8 @@ def outbound_pack_ship_htmx(
 ) -> Response:
     api = ApiClient(token=get_session_token(request))
     flash_msg, api_error, gi_info = None, None, None
-    box_types, vehicles = _load_packing_lookups(api)
+    selected_order_id = order_id.strip()
+    box_types, vehicles, packing_orders = _load_packing_lookups(api)
     try:
         if action == "package":
             payload = {"weight_kg": weight_kg, **_v(version_no)}
@@ -431,6 +468,8 @@ def outbound_pack_ship_htmx(
         "api_error": api_error,
         "box_types": box_types,
         "vehicles": vehicles,
+        "packing_orders": packing_orders,
+        "selected_order_id": selected_order_id,
         "gi_info": gi_info,
     }
     return get_templates(request).TemplateResponse(

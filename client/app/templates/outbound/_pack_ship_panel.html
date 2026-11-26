@@ -8,11 +8,16 @@
       <div><strong>Mã vận đơn TMS:</strong> {{ gi_info.waybill_text }}</div>
     </div>
   {% endif %}
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+  <div id="pack-ship-forms" class="grid grid-cols-1 md:grid-cols-3 gap-4">
     <form hx-post="/outbound/pack-and-ship" hx-target="#outbound-pack-container" hx-swap="innerHTML" class="rounded-lg border border-slate-200 p-3 space-y-2">
       <input type="hidden" name="action" value="package" />
       <div class="font-medium text-sm text-slate-700">1. Đóng gói kiện hàng</div>
-      <input type="text" name="order_id" placeholder="UUID Đơn xuất kho" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs" />
+      <select name="order_id" aria-label="Đơn xuất kho (Bước 1)" required class="pack-step-order w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">-- Chọn đơn xuất kho --</option>
+        {% for o in packing_orders or [] %}
+          <option value="{{ o.id }}" {% if selected_order_id == o.id %}selected{% endif %}>{{ o.label }}{% if o.status %} ({{ o.status }}){% endif %}</option>
+        {% endfor %}
+      </select>
       <select name="box_type_id" aria-label="Loại thùng" class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
         <option value="">-- Chọn loại thùng --</option>
         {% for b in box_types or [] %}
@@ -25,7 +30,12 @@
     <form hx-post="/outbound/pack-and-ship" hx-target="#outbound-pack-container" hx-swap="innerHTML" class="rounded-lg border border-slate-200 p-3 space-y-2">
       <input type="hidden" name="action" value="create_gi" />
       <div class="font-medium text-sm text-slate-700">2. Lập phiếu xuất kho GI</div>
-      <input type="text" name="order_id" placeholder="UUID Đơn xuất kho" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs" />
+      <select name="order_id" aria-label="Đơn xuất kho (Bước 2)" required class="pack-step-order w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">-- Chọn đơn xuất kho --</option>
+        {% for o in packing_orders or [] %}
+          <option value="{{ o.id }}" {% if selected_order_id == o.id %}selected{% endif %}>{{ o.label }}{% if o.status %} ({{ o.status }}){% endif %}</option>
+        {% endfor %}
+      </select>
       <select name="vehicle_id" aria-label="Xe và tài xế" class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
         <option value="">-- Chọn xe & tài xế --</option>
         {% for v in vehicles or [] %}
@@ -44,3 +54,11 @@
     </form>
   </div>
 </div>
+<script>
+(function () {
+  const c = document.getElementById("pack-ship-forms");
+  if (!c) return;
+  const sels = Array.from(c.querySelectorAll("select.pack-step-order"));
+  sels.forEach((s) => s.addEventListener("change", () => sels.forEach((o) => { if (o !== s) o.value = s.value; })));
+})();
+</script>

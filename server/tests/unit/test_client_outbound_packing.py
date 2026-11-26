@@ -42,6 +42,7 @@ def test_packing_page_loads_box_types_and_vehicles_for_dg1(
     web: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cookies = _login(web, "nv_dongoi")
+    box_params: list[dict[str, Any] | None] = []
 
     def fake_get(
         self: ApiClient, path: str, params: dict[str, Any] | None = None
@@ -51,7 +52,14 @@ def test_packing_page_loads_box_types_and_vehicles_for_dg1(
                 "data": {"username": "nv_dongoi", "role_code": "nv_dongoi", "permissions": ["DG-1"]}
             }
         if path == "/box-types":
-            return {"data": [{"box_type_id": "b1", "box_code": "BOX-S", "box_name": "Nho"}]}
+            box_params.append(params)
+            return {
+                "data": [
+                    {"box_type_id": "b1", "box_code": "BOX-S", "box_name": "Nho"},
+                    {"box_type_id": "b2", "box_code": "BOX-M", "box_name": "Vua"},
+                    {"box_type_id": "b3", "box_code": "BOX-L", "box_name": "Lon"},
+                ]
+            }
         if path == "/vehicles":
             return {
                 "data": [
@@ -62,11 +70,26 @@ def test_packing_page_loads_box_types_and_vehicles_for_dg1(
                     }
                 ]
             }
+        if path == "/outbound-orders?status=PACKING":
+            return {
+                "data": [
+                    {
+                        "order_id": "ord-101",
+                        "erp_order_number": "SO-2026-101",
+                        "customer_name": "Khach Hang A",
+                        "status": "PACKING",
+                    }
+                ]
+            }
         return {"data": []}
 
     monkeypatch.setattr(ApiClient, "get", fake_get)
     resp = web.get("/outbound/packing", cookies=cookies)
-    assert resp.status_code == 200 and "BOX-S" in resp.text and "51C-123.45" in resp.text
+    assert resp.status_code == 200
+    assert box_params and "is_active" not in (box_params[0] or {})
+    assert "BOX-S" in resp.text and "BOX-M" in resp.text and "BOX-L" in resp.text
+    assert "51C-123.45" in resp.text
+    assert "SO-2026-101" in resp.text and "Khach Hang A" in resp.text
 
 
 def test_three_step_packing_gi_and_waybill_error(
