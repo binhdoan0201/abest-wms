@@ -1,10 +1,12 @@
 """ABEST WMS - Bộ định tuyến API (Routers) cho Phân hệ Nhiệm vụ (Tasks).
 
-Khai báo các endpoint theo Mục 4.7 Chuẩn API:
+Khai báo các endpoint theo Mục 4.7 Chuẩn API & D-02:
 - GET /tasks (nhân viên thực thi chỉ xem task của mình; thukho, quanly xem tất cả)
 - GET /tasks/{id}
 - POST /tasks (thukho, quanly)
+- POST /tasks/auto-assign (thukho, quanly - giao tự động hàng đợi)
 - POST /tasks/{id}/assign (thukho, quanly)
+- POST /tasks/{id}/priority (thukho, quanly - đổi mức ưu tiên)
 - POST /tasks/{id}/accept (nhân viên được giao)
 - POST /tasks/{id}/reject (nhân viên được giao)
 - POST /tasks/{id}/complete (nhân viên được giao)
@@ -15,7 +17,7 @@ Khai báo các endpoint theo Mục 4.7 Chuẩn API:
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 
 from server.app.core.database import DbSession, get_db
 from server.app.core.exceptions import BusinessError
@@ -24,11 +26,13 @@ from server.app.core.responses import success_response
 from server.app.modules.tasks.schemas import (
     AcceptTaskRequest,
     AssignTaskRequest,
+    AutoAssignTasksRequest,
     CancelTaskRequest,
     CompleteTaskRequest,
     CreateTaskRequest,
     ReassignTaskRequest,
     RejectTaskRequest,
+    UpdateTaskPriorityRequest,
 )
 from server.app.modules.tasks.services import TaskService
 
@@ -73,6 +77,33 @@ def get_tasks(
     return success_response(data=[t.model_dump() for t in tasks], total=len(tasks))
 
 
+@router.post("/auto-assign", summary="Tự động giao các nhiệm vụ đang chờ trong kho")
+def auto_assign_tasks_endpoint(
+    req: AutoAssignTasksRequest | None = Body(default=None),
+    user_ctx: UserContext = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Tự động giao các nhiệm vụ chưa có người nhận cho nhân viên cùng khâu ít việc nhất."""
+    if user_ctx.role_code not in SUPERVISOR_ROLES:
+        raise BusinessError(
+            code="FORBIDDEN",
+            message="Không có quyền tự động giao nhiệm vụ",
+            http_status=403,
+        )
+
+    if not user_ctx.warehouse_id:
+        raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
+
+    stage = req.stage if req is not None else None
+    assigned = TaskService.auto_assign_queue(
+        db=db,
+        warehouse_id=user_ctx.warehouse_id,
+        assigner_id=user_ctx.user_id,
+        stage=stage,
+    )
+    return success_response(data=[t.model_dump() for t in assigned], total=len(assigned))
+
+
 @router.get("/{task_id}", summary="Chi tiết nhiệm vụ")
 def get_task_detail(
     task_id: uuid.UUID,
@@ -114,6 +145,34 @@ def create_task_endpoint(
         warehouse_id=user_ctx.warehouse_id,
         creator_id=user_ctx.user_id,
         req=req,
+    )
+    return success_response(data=task.model_dump())
+
+
+@router.post("/{task_id}/priority", summary="Đổi độ ưu tiên nhiệm vụ")
+def update_task_priority_endpoint(
+    task_id: uuid.UUID,
+    req: UpdateTaskPriorityRequest,
+    user_ctx: UserContext = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Đổi mức độ ưu tiên nhiệm vụ (NORMAL / HIGH / URGENT) (Thủ kho, Quản lý)."""
+    if user_ctx.role_code not in SUPERVISOR_ROLES:
+        raise BusinessError(
+            code="FORBIDDEN",
+            message="Không có quyền đổi độ ưu tiên nhiệm vụ",
+            http_status=403,
+        )
+
+    if not user_ctx.warehouse_id:
+        raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
+
+    task = TaskService.update_task_priority(
+        db=db,
+        task_id=task_id,
+        actor_id=user_ctx.user_id,
+        req=req,
+        warehouse_id=user_ctx.warehouse_id,
     )
     return success_response(data=task.model_dump())
 

@@ -578,6 +578,7 @@ def test_endpoints_full_lifecycle_and_rbac() -> None:
             {"new_assigned_to_user_id": str(uuid.uuid4()), "reason": "x", "version_no": 1},
         ),
         ("cancel", {"cancel_reason": "x", "version_no": 1}),
+        ("priority", {"priority": "URGENT", "version_no": 1}),
     ],
 )
 def test_endpoints_forbidden_for_worker_role(action: str, body: dict[str, Any]) -> None:
@@ -586,3 +587,75 @@ def test_endpoints_forbidden_for_worker_role(action: str, body: dict[str, Any]) 
     res = client.post(f"{BASE}/{uuid.uuid4()}/{action}", headers=headers, json=body)
     assert res.status_code == 403
     assert res.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_update_task_priority_and_auto_assign_flow() -> None:
+    """D-02: Doi muc do uu tien (ghi audit log) va giao task tu dong cho nguoi it viec nhat."""
+    thukho, _ = _login("thukho")
+    _, nv_nhan_id = _login("nv_nhan")
+    created_ids: list[str] = []
+
+    try:
+        # 1. Tao task NORMAL -> doi uu tien sang URGENT -> kiem tra audit log TASK_UPDATE_PRIORITY
+        t1 = client.post(
+            BASE,
+            headers=thukho,
+            json={
+                "task_type": "RECEIVING",
+                "stage": "NHAN_HANG",
+                "ref_doc_type": "PO",
+                "ref_doc_id": str(uuid.uuid4()),
+                "priority": "NORMAL",
+            },
+        ).json()["data"]
+        t1_id = t1["task_id"]
+        created_ids.append(t1_id)
+
+        res_prio = client.post(
+            f"{BASE}/{t1_id}/priority",
+            headers=thukho,
+            json={"priority": "URGENT", "version_no": t1["version_no"]},
+        )
+        assert res_prio.status_code == 200
+        prio_data = res_prio.json()["data"]
+        assert prio_data["priority"] == "URGENT"
+        assert prio_data["version_no"] == t1["version_no"] + 1
+
+        # 2. Tao task voi auto_assign=True -> tu dong giao cho nhan vien cung khau NHAN_HANG
+        t2_res = client.post(
+            BASE,
+            headers=thukho,
+            json={
+                "task_type": "RECEIVING",
+                "stage": "NHAN_HANG",
+                "ref_doc_type": "PO",
+                "ref_doc_id": str(uuid.uuid4()),
+                "priority": "HIGH",
+                "auto_assign": True,
+            },
+        )
+        assert t2_res.status_code == 200
+        t2 = t2_res.json()["data"]
+        created_ids.append(t2["task_id"])
+        assert t2["status"] == "ASSIGNED"
+        assert t2["assigned_to"] == nv_nhan_id
+
+        # 3. Goi /tasks/auto-assign cho hang doi -> task t1 (dang UNASSIGNED) cung duoc tu giao
+        res_auto = client.post(f"{BASE}/auto-assign", headers=thukho, json={"stage": "NHAN_HANG"})
+        assert res_auto.status_code == 200
+        auto_ids = [item["task_id"] for item in res_auto.json()["data"]]
+        assert t1_id in auto_ids
+    finally:
+        for tid in created_ids:
+            detail = client.get(f"{BASE}/{tid}", headers=thukho)
+            if detail.status_code == 200:
+                info = detail.json()["data"]
+                if info["status"] not in ("COMPLETED", "CANCELLED"):
+                    client.post(
+                        f"{BASE}/{tid}/cancel",
+                        headers=thukho,
+                        json={
+                            "cancel_reason": "Cleanup D-02 test",
+                            "version_no": info["version_no"],
+                        },
+                    )

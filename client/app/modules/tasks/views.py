@@ -1,4 +1,4 @@
-"""Web Controller cho phân hệ Điều phối & Thực thi Nhiệm vụ (Tasks) — Task D-08."""
+"""Web Controller cho phân hệ Điều phối & Thực thi Nhiệm vụ (Tasks) — Task D-08 & D-02."""
 
 from typing import Any
 
@@ -43,14 +43,15 @@ def _render_403(
 
 
 def _load_workers(api: ApiClient) -> list[dict[str, Any]]:
-    """Tải danh sách nhân viên trong kho để Thủ kho/Quản lý chọn khi giao việc."""
+    """Tải danh sách nhân viên đủ điều kiện nhận việc (`can_receive_tasks`) trong kho."""
     try:
         data = api.get("/users", params={"page_size": 100}).get("data", [])
         if isinstance(data, list):
             return [
                 u
                 for u in data
-                if str(u.get("role_code", "")).startswith("nv-") and u.get("is_active", True)
+                if str(u.get("role_code", "")).startswith("nv-")
+                and u.get("can_receive_tasks", u.get("is_active", True))
             ]
     except ClientApiError:
         pass
@@ -140,14 +141,16 @@ def create_task_htmx(
     ref_doc_type: str = Form(...),
     ref_doc_id: str = Form(...),
     priority: str = Form(default="NORMAL"),
+    auto_assign: str = Form(default=""),
     zone_id: str = Form(default=""),
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Response:
-    """HTMX: Thủ kho/Quản lý tạo nhiệm vụ thủ công kèm mức độ ưu tiên."""
+    """HTMX: Thủ kho/Quản lý tạo nhiệm vụ thủ công kèm mức ưu tiên và chế độ giao tự động."""
     api = ApiClient(token=get_session_token(request))
     role_code = user.get("role_code", "")
     is_supervisor = role_code in SUPERVISOR_ROLES
     flash_msg, api_error = None, None
+    is_auto = auto_assign.strip().lower() in {"1", "true", "on", "yes"}
 
     payload: dict[str, Any] = {
         "task_type": task_type,
@@ -155,13 +158,60 @@ def create_task_htmx(
         "ref_doc_type": ref_doc_type.strip(),
         "ref_doc_id": ref_doc_id.strip(),
         "priority": priority,
+        "auto_assign": is_auto,
     }
     if zone_id.strip():
         payload["zone_id"] = zone_id.strip()
 
     try:
         res = api.post("/tasks", json_data=payload).get("data", {})
-        flash_msg = f"Đã tạo nhiệm vụ mới ({res.get('task_id', '')}) với ưu tiên {priority}."
+        if res.get("assigned_to"):
+            flash_msg = (
+                f"Đã tạo nhiệm vụ mới ({res.get('task_id', '')}) ưu tiên {priority} "
+                f"và tự động giao cho nhân viên {res.get('assigned_to')}."
+            )
+        else:
+            flash_msg = f"Đã tạo nhiệm vụ mới ({res.get('task_id', '')}) với ưu tiên {priority}."
+    except ClientApiError as exc:
+        api_error = {"code": exc.code, "message": exc.message}
+
+    tasks, _ = _fetch_tasks(api, scope="all" if is_supervisor else "mine")
+    return get_templates(request).TemplateResponse(
+        request=request,
+        name="tasks/_tasks_panel.html",
+        context={
+            "request": request,
+            "user": user,
+            "is_supervisor": is_supervisor,
+            "tasks": tasks,
+            "workers": _load_workers(api) if is_supervisor else [],
+            "flash_msg": flash_msg,
+            "api_error": api_error,
+        },
+    )
+
+
+@router.post("/auto-assign", response_class=HTMLResponse)
+def auto_assign_queue_htmx(
+    request: Request,
+    stage: str = Form(default=""),
+    user: dict[str, Any] = Depends(get_current_user),
+) -> Response:
+    """HTMX: Tự động phân công các task chưa giao cho nhân viên cùng khâu ít việc nhất."""
+    api = ApiClient(token=get_session_token(request))
+    role_code = user.get("role_code", "")
+    is_supervisor = role_code in SUPERVISOR_ROLES
+    flash_msg, api_error = None, None
+
+    payload: dict[str, Any] = {}
+    if stage.strip():
+        payload["stage"] = stage.strip()
+
+    try:
+        res = api.post("/tasks/auto-assign", json_data=payload)
+        assigned_list = res.get("data", [])
+        count = len(assigned_list) if isinstance(assigned_list, list) else 0
+        flash_msg = f"Đã tự động phân công {count} nhiệm vụ chờ cho nhân viên phù hợp."
     except ClientApiError as exc:
         api_error = {"code": exc.code, "message": exc.message}
 
@@ -188,11 +238,12 @@ def dispatch_task_htmx(
     action: str = Form(...),
     version_no: int = Form(...),
     worker_user_id: str = Form(default=""),
+    priority: str = Form(default=""),
     note_or_reason: str = Form(default=""),
     completed_qty: str = Form(default=""),
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Response:
-    """HTMX: Giao việc, điều chuyển, hủy task (quản lý) hoặc nhận/từ chối/hoàn tất (nhân viên)."""
+    """HTMX: Giao việc, đổi ưu tiên, điều chuyển, hủy task hoặc nhận/từ chối/hoàn tất."""
     api = ApiClient(token=get_session_token(request))
     role_code = user.get("role_code", "")
     is_supervisor = role_code in SUPERVISOR_ROLES
@@ -208,6 +259,15 @@ def dispatch_task_htmx(
                 },
             )
             flash_msg = "Đã giao nhiệm vụ cho nhân viên."
+        elif action == "priority":
+            api.post(
+                f"/tasks/{task_id}/priority",
+                json_data={
+                    "priority": priority.strip() or "NORMAL",
+                    "version_no": version_no,
+                },
+            )
+            flash_msg = f"Đã cập nhật mức độ ưu tiên sang {priority.strip() or 'NORMAL'}."
         elif action == "reassign":
             payload_re: dict[str, Any] = {
                 "new_assigned_to_user_id": worker_user_id.strip(),

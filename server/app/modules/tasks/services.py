@@ -1,8 +1,9 @@
 """ABEST WMS - Tầng Nghiệp vụ (Service) cho Phân hệ Nhiệm vụ (Tasks).
 
 Triển khai đầy đủ các nghiệp vụ D-01, D-02:
-- create_task (tự tính `sla_due_at` theo cấu hình `warehouse_configs.task_sla_minutes`)
-- assign_task (kiểm tra phạm vi kho, điều kiện nhân viên, khâu làm việc và giới hạn task mở)
+- create_task (tự tính `sla_due_at`, hỗ trợ `auto_assign` giao ngay cho người ít việc nhất)
+- assign_task / auto_assign_task / auto_assign_queue (giao tự động cùng khâu, can_receive_tasks)
+- update_task_priority (đổi mức ưu tiên NORMAL / HIGH / URGENT, có audit log)
 - accept_task / reject_task / complete_task
 - reassign_task (điều chuyển task sang nhân viên khác, reset `started_at`)
 - cancel_task (hủy task chưa hoàn tất)
@@ -11,6 +12,7 @@ Triển khai đầy đủ các nghiệp vụ D-01, D-02:
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -28,6 +30,7 @@ from server.app.modules.tasks.schemas import (
     ReassignTaskRequest,
     RejectTaskRequest,
     TaskResponse,
+    UpdateTaskPriorityRequest,
 )
 
 
@@ -66,6 +69,37 @@ def _get_task_in_warehouse(
     if not task or task.warehouse_id != warehouse_id:
         raise BusinessError(code="NOT_FOUND", message="Không tìm thấy nhiệm vụ", http_status=404)
     return task
+
+
+def _is_user_eligible_for_task(
+    user_info: dict[str, Any],
+    stage: str,
+    now: datetime,
+) -> bool:
+    """Kiểm tra nhân viên đủ điều kiện nhận việc (tương thích `can_receive_tasks`)."""
+    if user_info.get("status") != "ACTIVE":
+        return False
+
+    role_code = str(user_info.get("role_code") or "")
+    is_executor = role_code.startswith("nv-")
+    is_mgmt_general = stage == "QUAN_LY_CHUNG" and role_code in {"thukho", "quanly"}
+    if not is_executor and not is_mgmt_general:
+        return False
+
+    if user_info.get("primary_stage") != stage:
+        return False
+
+    if user_info.get("is_seasonal"):
+        if not user_info.get("is_safety_checked"):
+            return False
+        valid_from = user_info.get("valid_from")
+        valid_until = user_info.get("valid_until")
+        if (valid_from is not None and now < valid_from) or (
+            valid_until is not None and now > valid_until
+        ):
+            return False
+
+    return True
 
 
 def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
@@ -138,6 +172,61 @@ def _check_assignee(db: Session, task: Task, user_id: uuid.UUID) -> None:
         )
 
 
+def _try_auto_assign_single_task(
+    db: Session,
+    task: Task,
+    assigner_id: uuid.UUID,
+) -> bool:
+    """Tìm nhân viên cùng khâu đang ít task mở nhất và có `can_receive_tasks = True` để giao."""
+    if task.status not in ("UNASSIGNED", "REJECTED"):
+        return False
+
+    limit = TaskRepository.get_max_open_tasks(db, task.warehouse_id)
+    candidates = TaskRepository.list_stage_candidates_for_auto_assign(
+        db, task.warehouse_id, task.stage
+    )
+    now = datetime.now(timezone.utc)
+
+    best_candidate: dict[str, Any] | None = None
+    best_open_count = limit + 1
+
+    for cand in candidates:
+        if not _is_user_eligible_for_task(cand, task.stage, now):
+            continue
+        open_count = int(cand.get("open_tasks") or 0)
+        if open_count >= limit:
+            continue
+        if open_count < best_open_count:
+            best_open_count = open_count
+            best_candidate = cand
+
+    if best_candidate is None:
+        return False
+
+    chosen_user_id = uuid.UUID(str(best_candidate["user_id"]))
+    task.assigned_to = chosen_user_id
+    task.assigned_by = assigner_id
+    task.status = "ASSIGNED"
+    task.rejection_reason = None
+    task.version_no += 1
+    db.flush()
+
+    create_audit_log(
+        db,
+        action_code="TASK_AUTO_ASSIGN",
+        entity_name="tasks",
+        actor_user_id=assigner_id,
+        warehouse_id=task.warehouse_id,
+        entity_id=task.task_id,
+        new_values={
+            "assigned_to": str(chosen_user_id),
+            "status": "ASSIGNED",
+            "open_tasks_before": best_open_count,
+        },
+    )
+    return True
+
+
 class TaskService:
     """Service điều phối vòng đời nhiệm vụ trong kho."""
 
@@ -147,8 +236,9 @@ class TaskService:
         warehouse_id: uuid.UUID,
         creator_id: uuid.UUID,
         req: CreateTaskRequest,
+        auto_assign: bool = False,
     ) -> TaskResponse:
-        """Tạo mới nhiệm vụ với trạng thái ban đầu UNASSIGNED và tính `sla_due_at`."""
+        """Tạo mới nhiệm vụ (tự tính `sla_due_at`, tự giao nếu `auto_assign=True`)."""
         sla_minutes = TaskRepository.get_task_sla_minutes(db, warehouse_id, req.task_type)
         sla_due_at = (
             datetime.now(timezone.utc) + timedelta(minutes=sla_minutes)
@@ -183,7 +273,74 @@ class TaskService:
             entity_id=saved_task.task_id,
             new_values={"task_type": req.task_type, "status": "UNASSIGNED"},
         )
+
+        if auto_assign or getattr(req, "auto_assign", False):
+            _try_auto_assign_single_task(db, saved_task, creator_id)
+
         return _task_to_schema(saved_task)
+
+    @staticmethod
+    def auto_assign_queue(
+        db: Session,
+        warehouse_id: uuid.UUID,
+        assigner_id: uuid.UUID,
+        stage: str | None = None,
+    ) -> list[TaskResponse]:
+        """Tự động giao nhiệm vụ đang chờ (UNASSIGNED/REJECTED) cho người ít việc nhất."""
+        queue_tasks = TaskRepository.get_queue_tasks_for_auto_assign(
+            db, warehouse_id=warehouse_id, stage=stage
+        )
+        assigned_tasks: list[TaskResponse] = []
+        for task in queue_tasks:
+            if _try_auto_assign_single_task(db, task, assigner_id):
+                assigned_tasks.append(_task_to_schema(task))
+        return assigned_tasks
+
+    @staticmethod
+    def update_task_priority(
+        db: Session,
+        task_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        req: UpdateTaskPriorityRequest,
+        warehouse_id: uuid.UUID,
+    ) -> TaskResponse:
+        """Đổi mức độ ưu tiên của nhiệm vụ (NORMAL / HIGH / URGENT) và ghi audit log."""
+        task = _get_task_in_warehouse(db, task_id, warehouse_id, for_update=True)
+
+        if req.version_no != task.version_no:
+            raise BusinessError(
+                code="VERSION_CONFLICT",
+                message="Nhiệm vụ đã được cập nhật bởi thao tác khác",
+                http_status=409,
+                details={"current_version_no": task.version_no},
+            )
+
+        if task.status in ("COMPLETED", "CANCELLED"):
+            raise BusinessError(
+                code="INVALID_STATE",
+                message=f"Không thể đổi độ ưu tiên nhiệm vụ đang ở trạng thái `{task.status}`",
+                http_status=409,
+            )
+
+        old_priority = task.priority
+        if old_priority == req.priority:
+            return _task_to_schema(task)
+
+        task.priority = req.priority
+        task.version_no += 1
+        db.flush()
+
+        create_audit_log(
+            db,
+            action_code="TASK_UPDATE_PRIORITY",
+            entity_name="tasks",
+            actor_user_id=actor_id,
+            warehouse_id=task.warehouse_id,
+            entity_id=task.task_id,
+            old_values={"priority": old_priority},
+            new_values={"priority": req.priority},
+        )
+        return _task_to_schema(task)
 
     @staticmethod
     def assign_task(
@@ -523,6 +680,8 @@ class TaskService:
 # Export các hàm công khai
 create_task = TaskService.create_task
 assign_task = TaskService.assign_task
+auto_assign_queue = TaskService.auto_assign_queue
+update_task_priority = TaskService.update_task_priority
 accept_task = TaskService.accept_task
 reject_task = TaskService.reject_task
 complete_task = TaskService.complete_task
