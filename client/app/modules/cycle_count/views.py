@@ -32,10 +32,25 @@ def _perms(user: dict[str, Any]) -> set[str]:
     return out
 
 
+def _safe_list(
+    api: ApiClient, path: str, params: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    try:
+        raw = api.get(path, params=params).get("data", [])
+        if isinstance(raw, list):
+            return [x for x in raw if isinstance(x, dict)]
+        if isinstance(raw, dict) and isinstance(raw.get("items"), list):
+            return [x for x in raw["items"] if isinstance(x, dict)]
+    except ClientApiError:
+        pass
+    return []
+
+
 @router.get("/cycle-count", response_class=HTMLResponse)
 def cycle_count_index(
     request: Request,
     sheet_id: str | None = None,
+    count_sheet_id: str | None = None,
     msg: str | None = None,
     err: str | None = None,
     user: dict[str, Any] = Depends(get_current_user),
@@ -56,13 +71,31 @@ def cycle_count_index(
             status_code=403,
         )
 
+    active_sheet_id = (sheet_id or count_sheet_id or "").strip() or None
     sheets, selected_sheet, api_err = [], None, err
+    locations: list[dict[str, Any]] = []
+    location_code_map: dict[str, str] = {}
+    sku_code_map: dict[str, str] = {}
+
     try:
         sheets = api.get("/cycle-counts").get("data", [])
-        if sheet_id:
-            selected_sheet = api.get(f"/cycle-counts/{sheet_id}").get("data")
+        if active_sheet_id:
+            selected_sheet = api.get(f"/cycle-counts/{active_sheet_id}").get("data")
     except ClientApiError as exc:
         api_err = exc.message
+
+    locations = _safe_list(api, "/locations", {"page_size": 200})
+    for loc in locations:
+        lid = str(loc.get("location_id") or "")
+        lcode = str(loc.get("location_code") or loc.get("code") or "")
+        if lid and lcode:
+            location_code_map[lid] = lcode
+
+    for sku in _safe_list(api, "/skus", {"page_size": 200}):
+        sid = str(sku.get("sku_id") or "")
+        scode = str(sku.get("sku_code") or "")
+        if sid and scode:
+            sku_code_map[sid] = scode
 
     return _tpl(request).TemplateResponse(
         request=request,
@@ -75,6 +108,9 @@ def cycle_count_index(
             "perms": perms,
             "sheets": sheets,
             "selected_sheet": selected_sheet,
+            "locations": locations,
+            "location_code_map": location_code_map,
+            "sku_code_map": sku_code_map,
             "flash_msg": msg,
             "api_error": api_err,
         },
@@ -85,11 +121,11 @@ def cycle_count_index(
 def cycle_count_create(
     request: Request,
     count_type: str = Form(default="PERIODIC"),
-    location_ids_raw: str = Form(...),
+    location_ids: list[str] = Form(default=[]),
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Response:
     api = ApiClient(token=get_session_token(request))
-    loc_ids = [x.strip() for x in location_ids_raw.split(",") if x.strip()]
+    loc_ids = [x.strip() for x in location_ids if x and x.strip()]
     due_at = (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
     try:
         data = api.post(

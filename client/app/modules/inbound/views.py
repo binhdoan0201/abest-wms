@@ -31,6 +31,30 @@ def _perms(user: dict[str, Any]) -> set[str]:
     return out
 
 
+def _safe_list(
+    api: ApiClient, path: str, params: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    try:
+        raw = api.get(path, params=params).get("data", [])
+        if isinstance(raw, list):
+            return [x for x in raw if isinstance(x, dict)]
+        if isinstance(raw, dict) and isinstance(raw.get("items"), list):
+            return [x for x in raw["items"] if isinstance(x, dict)]
+    except ClientApiError:
+        pass
+    return []
+
+
+def _safe_dict(api: ApiClient, path: str) -> dict[str, Any] | None:
+    try:
+        raw = api.get(path).get("data")
+        if isinstance(raw, dict):
+            return raw
+    except ClientApiError:
+        pass
+    return None
+
+
 @router.get("/inbound", response_class=HTMLResponse)
 def inbound_index(
     request: Request,
@@ -56,12 +80,19 @@ def inbound_index(
             status_code=403,
         )
 
-    pos, grns, selected_grn, suggestions, api_err = [], [], None, [], err
+    pos: list[dict[str, Any]] = []
+    grns: list[dict[str, Any]] = []
+    selected_grn: dict[str, Any] | None = None
+    sku_options: list[dict[str, Any]] = []
+    reason_codes: list[dict[str, Any]] = []
+    sku_code_map: dict[str, str] = {}
+    staged_pallets: list[dict[str, Any]] = []
+    putaway_version_no = 1
+    suggestions: list[dict[str, Any]] = []
+    api_err = err
+
     if "NH-1" in perms or "NH-5" in perms:
-        try:
-            pos = api.get("/purchase-orders").get("data", [])
-        except ClientApiError:
-            pos = []
+        pos = _safe_list(api, "/purchase-orders", {"page_size": 100})
         try:
             grns = api.get("/grns").get("data", [])
         except ClientApiError as exc:
@@ -72,16 +103,92 @@ def inbound_index(
             except ClientApiError as exc:
                 api_err = exc.message
 
-    if pallet_id and "CAT-1" in perms:
-        try:
-            raw_suggestions = (
-                api.post("/putaway/suggest", json_data={"pallet_id": pallet_id})
-                .get("data", {})
-                .get("suggestions", [])
-            )
-            suggestions = raw_suggestions[:5]
-        except ClientApiError as exc:
-            api_err = exc.message
+        all_skus = _safe_list(api, "/skus", {"page_size": 200})
+        for s in all_skus:
+            sid = str(s.get("sku_id") or "")
+            scode = str(s.get("sku_code") or "")
+            sname = str(s.get("sku_name") or s.get("name") or "")
+            if sid:
+                sku_code_map[sid] = scode or sid
+            if sid or scode:
+                sku_options.append(
+                    {
+                        "sku_id": sid,
+                        "sku_code": scode,
+                        "sku_name": sname,
+                        "uom_code": s.get("uom_code") or s.get("base_uom") or "",
+                        "qty_expected": None,
+                    }
+                )
+
+        reason_codes = _safe_list(api, "/reason-codes", {"is_active": "true", "page_size": 100})
+
+        if isinstance(selected_grn, dict):
+            po_id_val = selected_grn.get("po_id")
+            if po_id_val:
+                po_detail = _safe_dict(api, f"/purchase-orders/{po_id_val}")
+                po_lines = po_detail.get("lines", []) if isinstance(po_detail, dict) else []
+                if isinstance(po_lines, list) and po_lines:
+                    po_sku_opts: list[dict[str, Any]] = []
+                    for ln in po_lines:
+                        if not isinstance(ln, dict):
+                            continue
+                        sid = str(ln.get("sku_id") or "")
+                        scode = str(ln.get("sku_code") or sku_code_map.get(sid, ""))
+                        sname = str(ln.get("sku_name") or "")
+                        if sid and scode:
+                            sku_code_map[sid] = scode
+                        po_sku_opts.append(
+                            {
+                                "sku_id": sid,
+                                "sku_code": scode,
+                                "sku_name": sname,
+                                "uom_code": ln.get("uom_code") or "",
+                                "qty_expected": ln.get("qty_ordered"),
+                            }
+                        )
+                    if po_sku_opts:
+                        sku_options = po_sku_opts
+
+            for ln in (
+                selected_grn.get("lines", []) if isinstance(selected_grn.get("lines"), list) else []
+            ):
+                if isinstance(ln, dict):
+                    sid = str(ln.get("sku_id") or "")
+                    if sid and sid not in sku_code_map:
+                        sku_code_map[sid] = str(ln.get("sku_code") or sid)
+
+    if "CAT-1" in perms:
+        all_pallets = _safe_list(api, "/pallets")
+        staged_pallets = [p for p in all_pallets if str(p.get("status") or "").upper() == "STAGED"]
+        active_pallet_id = (pallet_id or "").strip()
+        if active_pallet_id:
+            p_detail = _safe_dict(api, f"/pallets/{active_pallet_id}")
+            if isinstance(p_detail, dict) and p_detail.get("version_no") is not None:
+                try:
+                    putaway_version_no = int(p_detail["version_no"])
+                except (TypeError, ValueError):
+                    putaway_version_no = 1
+            else:
+                for p in staged_pallets:
+                    if (
+                        str(p.get("pallet_id") or "") == active_pallet_id
+                        and p.get("version_no") is not None
+                    ):
+                        try:
+                            putaway_version_no = int(p["version_no"])
+                        except (TypeError, ValueError):
+                            putaway_version_no = 1
+                        break
+            try:
+                raw_suggestions = (
+                    api.post("/putaway/suggest", json_data={"pallet_id": active_pallet_id})
+                    .get("data", {})
+                    .get("suggestions", [])
+                )
+                suggestions = raw_suggestions[:5]
+            except ClientApiError as exc:
+                api_err = exc.message
 
     return _tpl(request).TemplateResponse(
         request=request,
@@ -95,6 +202,11 @@ def inbound_index(
             "pos": pos,
             "grns": grns,
             "selected_grn": selected_grn,
+            "sku_options": sku_options,
+            "reason_codes": reason_codes,
+            "sku_code_map": sku_code_map,
+            "staged_pallets": staged_pallets,
+            "putaway_version_no": putaway_version_no,
             "pallet_id": pallet_id or "",
             "suggestions": suggestions,
             "flash_msg": msg,
@@ -117,11 +229,10 @@ def inbound_create_grn(
     }
     try:
         data = api.post("/grns", json_data=payload).get("data", {})
+        grn_id = data.get("grn_id", "")
         msg = quote_plus("Đã mở phiếu nhập kho")
-        return RedirectResponse(
-            url=f"/inbound?grn_id={data.get('grn_id', '')}&msg={msg}",
-            status_code=303,
-        )
+        target = f"/inbound?grn_id={grn_id}&msg={msg}" if grn_id else f"/inbound?msg={msg}"
+        return RedirectResponse(url=target, status_code=303)
     except ClientApiError as exc:
         return RedirectResponse(url=f"/inbound?err={quote_plus(exc.message)}", status_code=303)
 
