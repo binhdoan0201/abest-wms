@@ -113,6 +113,17 @@ def _to_vn_date(raw_val: date | datetime | str) -> date:
 class OutboundService:
     """Service điều phối quy trình xuất kho, cấp phát, soạn hàng, đóng gói và phát hành GI."""
 
+    _DG1_ALLOWED_STATUSES: tuple[str, ...] = (
+        "PICKED",
+        "PACKING",
+        "READY_TO_SHIP",
+        "WAITING_WAYBILL",
+    )
+
+    @staticmethod
+    def _is_dg1_only(user_ctx: UserContext) -> bool:
+        return "DG-1" in user_ctx.permissions and "QL-2.1" not in user_ctx.permissions
+
     @staticmethod
     def list_orders(
         db: Session,
@@ -122,28 +133,19 @@ class OutboundService:
         page_size: int = 20,
         access_type: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        allowed_dg1 = ("PICKED", "PACKING", "READY_TO_SHIP", "WAITING_WAYBILL")
-        dg1_only = "DG-1" in user_ctx.permissions and "QL-2.1" not in user_ctx.permissions
-        if dg1_only:
-            if status and status not in allowed_dg1:
+        statuses_filter: list[str] | None = None
+        if OutboundService._is_dg1_only(user_ctx):
+            if status and status not in OutboundService._DG1_ALLOWED_STATUSES:
                 return [], 0
-            if not status:
-                items, _ = OutboundRepository.list_orders(
-                    db=db,
-                    warehouse_id=user_ctx.warehouse_id,
-                    status=None,
-                    page=1,
-                    page_size=100,
-                )
-                filtered = [row for row in items if str(row.get("status") or "") in allowed_dg1]
-                start = (page - 1) * page_size
-                return filtered[start : start + page_size], len(filtered)
+            statuses_filter = [status] if status else list(OutboundService._DG1_ALLOWED_STATUSES)
+            status = None
         return OutboundRepository.list_orders(
             db=db,
             warehouse_id=user_ctx.warehouse_id,
             status=status,
             page=page,
             page_size=page_size,
+            statuses=statuses_filter,
         )
 
     @staticmethod
@@ -161,6 +163,14 @@ class OutboundService:
                 http_status=404,
             )
         enforce_warehouse_scope(user_ctx, order["warehouse_id"])
+        if OutboundService._is_dg1_only(user_ctx) and (
+            str(order.get("status") or "") not in OutboundService._DG1_ALLOWED_STATUSES
+        ):
+            raise BusinessError(
+                code="NOT_FOUND",
+                message="Không tìm thấy đơn xuất kho",
+                http_status=404,
+            )
 
         lines_raw = OutboundRepository.get_order_lines(db, order_id)
         allocs_raw = OutboundRepository.get_order_allocations(db, order_id)

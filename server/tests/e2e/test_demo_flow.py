@@ -366,6 +366,24 @@ def test_nv_dongoi_sees_picked_order_in_packing_dropdown_real_api() -> None:
     sku_id = _sql("SELECT sku_id FROM skus WHERE sku_code = :c", c=SKU_CODE)
     customer = _sql("SELECT erp_customer_code FROM customers ORDER BY 1 LIMIT 1")
     erp_order_no = f"SO-DG-{_marker}"
+    other_order_no = f"SO-DRAFT-{_marker}"
+
+    snap_db = SessionLocal()
+    try:
+        bal_rows = (
+            snap_db.execute(
+                text(
+                    "SELECT balance_id, qty_available, qty_allocated, qty_damaged "
+                    "FROM inventory_balances WHERE sku_id = :s"
+                ),
+                {"s": sku_id},
+            )
+            .mappings()
+            .all()
+        )
+        saved_balances = [dict(r) for r in bal_rows]
+    finally:
+        snap_db.close()
 
     order = _ok(
         client.post(
@@ -390,6 +408,30 @@ def test_nv_dongoi_sees_picked_order_in_packing_dropdown_real_api() -> None:
     )
     order_id = order["order_id"]
     _created_docs.append(uuid.UUID(order_id))
+
+    other_order = _ok(
+        client.post(
+            "/api/v1/outbound-orders",
+            headers=thukho,
+            json={
+                "erp_order_number": other_order_no,
+                "order_type": "SALES_ORDER",
+                "warehouse_code": "WH01",
+                "customer_code": customer,
+                "lines": [
+                    {
+                        "line_number": 1,
+                        "sku_code": SKU_CODE,
+                        "uom_code": "SET",
+                        "qty_ordered": 1,
+                    }
+                ],
+            },
+        ),
+        201,
+    )
+    other_order_id = other_order["order_id"]
+    _created_docs.append(uuid.UUID(other_order_id))
 
     _ok(
         client.post(
@@ -451,10 +493,24 @@ def test_nv_dongoi_sees_picked_order_in_packing_dropdown_real_api() -> None:
         page = web.get("/outbound/packing")
         assert page.status_code == 200, page.text
         assert erp_order_no in page.text
+        assert other_order_no not in page.text
     finally:
         ApiClient.backend_app = orig_backend
         db = SessionLocal()
         try:
+            for oid in (order_id, other_order_id):
+                db.execute(
+                    text("DELETE FROM inventory_allocations WHERE order_id = :oid"),
+                    {"oid": uuid.UUID(oid)},
+                )
+                db.execute(
+                    text("DELETE FROM outbound_order_lines WHERE order_id = :oid"),
+                    {"oid": uuid.UUID(oid)},
+                )
+                db.execute(
+                    text("DELETE FROM outbound_orders WHERE order_id = :oid"),
+                    {"oid": uuid.UUID(oid)},
+                )
             db.execute(
                 text("DELETE FROM pick_session_lines WHERE pick_session_id = :pid"),
                 {"pid": uuid.UUID(pick_id)},
@@ -463,18 +519,20 @@ def test_nv_dongoi_sees_picked_order_in_packing_dropdown_real_api() -> None:
                 text("DELETE FROM pick_sessions WHERE pick_session_id = :pid"),
                 {"pid": uuid.UUID(pick_id)},
             )
-            db.execute(
-                text("DELETE FROM inventory_allocations WHERE order_id = :oid"),
-                {"oid": uuid.UUID(order_id)},
-            )
-            db.execute(
-                text("DELETE FROM outbound_order_lines WHERE order_id = :oid"),
-                {"oid": uuid.UUID(order_id)},
-            )
-            db.execute(
-                text("DELETE FROM outbound_orders WHERE order_id = :oid"),
-                {"oid": uuid.UUID(order_id)},
-            )
+            for row in saved_balances:
+                db.execute(
+                    text(
+                        "UPDATE inventory_balances "
+                        "SET qty_available = :avail, qty_allocated = :alloc, qty_damaged = :dmg "
+                        "WHERE balance_id = :bid"
+                    ),
+                    {
+                        "avail": row["qty_available"],
+                        "alloc": row["qty_allocated"],
+                        "dmg": row["qty_damaged"],
+                        "bid": row["balance_id"],
+                    },
+                )
             db.commit()
         finally:
             db.close()

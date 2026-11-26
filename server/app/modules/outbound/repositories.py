@@ -40,6 +40,7 @@ class OutboundRepository:
         status: str | None,
         page: int,
         page_size: int,
+        statuses: tuple[str, ...] | list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         where_clauses = ["1=1"]
         params: dict[str, Any] = {
@@ -51,7 +52,10 @@ class OutboundRepository:
             where_clauses.append("o.warehouse_id = :warehouse_id")
             params["warehouse_id"] = warehouse_id
 
-        if status:
+        if statuses:
+            where_clauses.append("o.status::TEXT = ANY(:statuses)")
+            params["statuses"] = list(statuses)
+        elif status:
             where_clauses.append("o.status::TEXT = :status")
             params["status"] = status
 
