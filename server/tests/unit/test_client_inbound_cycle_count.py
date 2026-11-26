@@ -67,6 +67,52 @@ def _api_headers(api: TestClient, username: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _create_test_po(
+    db, po_prefix: str, sku_id: uuid.UUID, uom_code: str, qty_ordered: int
+) -> uuid.UUID:
+    po_id = uuid.uuid4()
+    supplier_id = db.execute(
+        text("SELECT supplier_id FROM suppliers ORDER BY 1 LIMIT 1;")
+    ).scalar_one()
+    db.execute(
+        text(
+            """
+            INSERT INTO purchase_orders (
+                po_id, warehouse_id, erp_po_number, supplier_id
+            ) VALUES (
+                :po_id, :wh_id, :po_num, :sup_id
+            )
+            """
+        ),
+        {
+            "po_id": po_id,
+            "wh_id": WAREHOUSE_ID,
+            "po_num": f"{po_prefix}-{uuid.uuid4().hex[:6].upper()}",
+            "sup_id": supplier_id,
+        },
+    )
+    db.execute(
+        text(
+            """
+            INSERT INTO po_lines (
+                po_line_id, po_id, line_number, sku_id, uom_code, qty_ordered
+            ) VALUES (
+                :line_id, :po_id, 1, :sku_id, :uom_code, :qty_ordered
+            )
+            """
+        ),
+        {
+            "line_id": uuid.uuid4(),
+            "po_id": po_id,
+            "sku_id": sku_id,
+            "uom_code": uom_code,
+            "qty_ordered": qty_ordered,
+        },
+    )
+    db.commit()
+    return po_id
+
+
 def _cleanup_po_grn(po_id: uuid.UUID | None, grn_id: uuid.UUID | None) -> None:
     db = SessionLocal()
     try:
@@ -121,7 +167,6 @@ def _cleanup_po_grn(po_id: uuid.UUID | None, grn_id: uuid.UUID | None) -> None:
 
 def test_b1_grn_recount_ui_flow(web: TestClient, api: TestClient) -> None:
     """nv_nhan đếm lệch -> thukho request-info -> nv_nhan2 mở form đếm lại và gửi thành công."""
-    admin_h = _api_headers(api, "admin")
     thukho_h = _api_headers(api, "thukho")
     nhan_h = _api_headers(api, "nv_nhan")
     nhan2_cookie = _web_login(web, "nv_nhan2")
@@ -130,9 +175,6 @@ def test_b1_grn_recount_ui_flow(web: TestClient, api: TestClient) -> None:
     try:
         sku_id = db.execute(
             text("SELECT sku_id FROM skus WHERE sku_code = 'SKU-GEN-008' LIMIT 1;")
-        ).scalar_one()
-        supplier_code = db.execute(
-            text("SELECT erp_supplier_code FROM suppliers ORDER BY 1 LIMIT 1;")
         ).scalar_one()
         reason_code = db.execute(
             text("SELECT reason_code FROM reason_codes WHERE is_active ORDER BY 1 LIMIT 1;")
@@ -143,25 +185,11 @@ def test_b1_grn_recount_ui_flow(web: TestClient, api: TestClient) -> None:
     po_id = None
     grn_id = None
     try:
-        r_po = api.post(
-            "/api/v1/integrations/erp/purchase-orders",
-            headers=admin_h,
-            json={
-                "erp_po_number": f"PO-UI-{uuid.uuid4().hex[:6].upper()}",
-                "warehouse_code": "WH01",
-                "supplier_code": supplier_code,
-                "lines": [
-                    {
-                        "line_number": 1,
-                        "sku_code": "SKU-GEN-008",
-                        "uom_code": "SET",
-                        "qty_ordered": 10,
-                    }
-                ],
-            },
-        )
-        assert r_po.status_code == 201, r_po.text
-        po_id = uuid.UUID(r_po.json()["data"]["doc_id"])
+        db_po = SessionLocal()
+        try:
+            po_id = _create_test_po(db_po, "PO-UI", sku_id, "SET", 10)
+        finally:
+            db_po.close()
 
         r_grn = api.post("/api/v1/grns", headers=nhan_h, json={"po_id": str(po_id)})
         assert r_grn.status_code == 201, r_grn.text
@@ -243,7 +271,6 @@ def test_b1_grn_recount_ui_flow(web: TestClient, api: TestClient) -> None:
 
 def test_b2_putaway_top5_suggestions_ui(web: TestClient, api: TestClient) -> None:
     """nv_cat mở pallet STAGED tại /inbound?pallet_id=... thấy tối đa 5 gợi ý vị trí cất hàng."""
-    admin_h = _api_headers(api, "admin")
     nhan_h = _api_headers(api, "nv_nhan")
     cat_cookie = _web_login(web, "nv_cat")
 
@@ -252,34 +279,17 @@ def test_b2_putaway_top5_suggestions_ui(web: TestClient, api: TestClient) -> Non
         sku_id = db.execute(
             text("SELECT sku_id FROM skus WHERE sku_code = 'SKU-GEN-008' LIMIT 1;")
         ).scalar_one()
-        supplier_code = db.execute(
-            text("SELECT erp_supplier_code FROM suppliers ORDER BY 1 LIMIT 1;")
-        ).scalar_one()
     finally:
         db.close()
 
     po_id = None
     grn_id = None
     try:
-        r_po = api.post(
-            "/api/v1/integrations/erp/purchase-orders",
-            headers=admin_h,
-            json={
-                "erp_po_number": f"PO-PUT-{uuid.uuid4().hex[:6].upper()}",
-                "warehouse_code": "WH01",
-                "supplier_code": supplier_code,
-                "lines": [
-                    {
-                        "line_number": 1,
-                        "sku_code": "SKU-GEN-008",
-                        "uom_code": "SET",
-                        "qty_ordered": 10,
-                    }
-                ],
-            },
-        )
-        assert r_po.status_code == 201, r_po.text
-        po_id = uuid.UUID(r_po.json()["data"]["doc_id"])
+        db_po = SessionLocal()
+        try:
+            po_id = _create_test_po(db_po, "PO-PUT", sku_id, "SET", 10)
+        finally:
+            db_po.close()
 
         r_grn = api.post("/api/v1/grns", headers=nhan_h, json={"po_id": str(po_id)})
         assert r_grn.status_code == 201, r_grn.text
