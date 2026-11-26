@@ -58,7 +58,7 @@
 
     <div class="space-y-3">
       {% for ln in selected_sheet.lines %}
-      {% set is_recount = (ln.status in ["COUNTED", "RECOUNTING", "NEED_INFO"] or ln.final_counted_qty is not none) %}
+      {% set is_recount = (ln.status not in ["PENDING", "AUTO_APPROVED_Z", "APPROVED", "ADJUSTED", "REJECTED"]) %}
       <div class="p-3.5 border rounded-xl {{ 'bg-amber-50/70 border-amber-200' if is_recount else 'bg-slate-50' }} space-y-2">
         <div class="flex justify-between text-xs text-slate-600">
           <span>Vị trí: <strong class="font-mono">{{ ln.location_id }}</strong></span>
@@ -72,7 +72,7 @@
           {% endif %}
         </div>
 
-        {% if "KK-1" in perms and ln.status in ["PENDING", "COUNTED", "RECOUNTING", "NEED_INFO"] %}
+        {% if "KK-1" in perms and ln.status not in ["AUTO_APPROVED_Z", "APPROVED", "ADJUSTED", "REJECTED"] %}
         {% if is_recount %}
         <div class="text-xs font-medium text-amber-800">
           Đếm lại dòng lệch (bắt buộc nhân viên kiểm kê khác người đếm lần trước; nếu cùng người phải nhập lý do ngoại lệ).

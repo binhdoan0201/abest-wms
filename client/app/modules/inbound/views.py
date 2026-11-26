@@ -60,11 +60,17 @@ def inbound_index(
     if "NH-1" in perms or "NH-5" in perms:
         try:
             pos = api.get("/purchase-orders").get("data", [])
+        except ClientApiError:
+            pos = []
+        try:
             grns = api.get("/grns").get("data", [])
-            if grn_id:
-                selected_grn = api.get(f"/grns/{grn_id}").get("data")
         except ClientApiError as exc:
             api_err = exc.message
+        if grn_id:
+            try:
+                selected_grn = api.get(f"/grns/{grn_id}").get("data")
+            except ClientApiError as exc:
+                api_err = exc.message
 
     if pallet_id and "CAT-1" in perms:
         try:
@@ -178,17 +184,19 @@ def inbound_submit_grn(
 
 
 @router.post("/inbound/grns/{grn_id}/recount")
-async def inbound_recount_grn(
+def inbound_recount_grn(
     request: Request,
     grn_id: str,
+    version_no: int = Form(1),
+    grn_line_id: list[str] = Form(default=[]),
+    qty_actual: list[str] = Form(default=[]),
+    qty_damaged: list[str] = Form(default=[]),
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Response:
     api = ApiClient(token=get_session_token(request))
-    form = await request.form()
-    version_no = int(str(form.get("version_no", 1)))
-    line_ids = [str(x).strip() for x in form.getlist("grn_line_id") if str(x).strip()]
-    qty_actuals = [str(x).strip() for x in form.getlist("qty_actual")]
-    qty_damageds = [str(x).strip() for x in form.getlist("qty_damaged")]
+    line_ids = [x.strip() for x in grn_line_id if x.strip()]
+    qty_actuals = [x.strip() for x in qty_actual]
+    qty_damageds = [x.strip() for x in qty_damaged]
 
     lines: list[dict[str, Any]] = []
     for idx, line_id in enumerate(line_ids):

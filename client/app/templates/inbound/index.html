@@ -56,7 +56,7 @@
             <tr>
               <td class="py-2 px-3 font-medium">{{ g.grn_number }}</td>
               <td class="py-2 px-3">
-                <span class="px-2 py-0.5 rounded text-xs {{ 'bg-amber-100 text-amber-800 font-semibold' if g.status in ['NEED_INFO', 'DISCREPANCY'] else 'bg-slate-100' }}">
+                <span class="px-2 py-0.5 rounded text-xs {{ 'bg-amber-100 text-amber-800 font-semibold' if (g.status in ['NEED_INFO', 'DISCREPANCY', 'RECOUNTING'] or g.status.startswith('PENDING_D')) else 'bg-slate-100' }}">
                   {{ g.status }}
                 </span>
               </td>
@@ -113,7 +113,7 @@
     </form>
     {% endif %}
 
-    {% if selected_grn.status in ["NEED_INFO", "DISCREPANCY"] and ("NH-5" in perms or "NH-1" in perms) %}
+    {% if (selected_grn.status in ["NEED_INFO", "DISCREPANCY", "RECOUNTING"] or selected_grn.status.startswith("PENDING_D")) and ("NH-5" in perms or "NH-1" in perms) %}
     <form method="post" action="/inbound/grns/{{ selected_grn.grn_id }}/recount" class="space-y-3 bg-amber-50 border border-amber-200 p-4 rounded-xl">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
