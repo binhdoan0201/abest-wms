@@ -41,15 +41,15 @@
 | :--- | :--- | :--- | :---: | :---: | :---: |
 | A-01 | Khung dự án: cấu trúc thư mục, FastAPI app, cấu hình, phiên DB, Docker Compose, `.env.example`, CI, pre-commit, README, CONTRIBUTING | `feature/core-auth` | P1 | Xong | #1, #3, #7, #8, #9 |
 | A-02 | Nạp schema v4.1, Alembic baseline, seed 9 vai trò, ma trận quyền, tài khoản demo | `feature/core-auth` | P1 | Xong | #2 (nạp bằng script SQL, không dùng Alembic) |
-| A-03 | Auth: đăng nhập JWT, làm mới token, `/me`, bắt đổi mật khẩu lần đầu, khóa tài khoản khi sai quá số lần | `feature/core-auth` | P1 | Xong | #4; làm mới token: PR A-hoàn thiện |
+| A-03 | Auth: đăng nhập JWT, làm mới token, `/me`, bắt đổi mật khẩu lần đầu, khóa tài khoản khi sai quá số lần | `feature/core-auth` | P1 | Xong | #4; làm mới token: #42 |
 | A-04 | RBAC: `require_permission`, lọc theo kho, `X_OWN`/`V_OWN`, kiểm tra SoD ở tầng ứng dụng | `feature/core-auth` | P1 | Xong | #4 |
 | A-05 | Audit log, exception handler, chuẩn response, bảng mã lỗi, xử lý xung đột phiên bản (409) | `feature/core-auth` | P1 | Xong | #3 |
 | A-06 | Inventory: lô, pallet, tồn 5 trạng thái, sổ cái; `apply_movement` (`RECEIVE`, `PUTAWAY`, `ALLOCATE`, `DEALLOCATE`, `PICK`, `SHIP_GI`, `ADJUSTMENT`, `LOCK_COUNT`); API tra cứu theo SKU, vị trí, lô (QL-1.1 đến QL-1.4) | `feature/inventory` | P1 | Xong | #5 |
 | A-07 | ERP mock và TMS mock: đẩy PO, ASN, SO mẫu; nhận GRN, GI; ghi `integration_sync_logs`; thử lại khi lỗi | `feature/integrations-mock` | P1 | Xong | #27, #36 |
-| A-08 | Client lõi: `api_client`, phiên đăng nhập, layout, menu theo quyền, trang tra cứu tồn | `feature/core-auth` | P1 | Xong | #6; trang tồn có lọc, lô, lịch sử: PR A-hoàn thiện |
+| A-08 | Client lõi: `api_client`, phiên đăng nhập, layout, menu theo quyền, trang tra cứu tồn | `feature/core-auth` | P1 | Xong | #6; trang tồn có lọc, lô, lịch sử: #42 |
 | A-09 | Review PR, giải quyết xung đột, gộp `develop` và `main`, gắn tag, viết bài test e2e theo kịch bản demo | các nhánh | P1 | Đang làm | #40 (e2e, dữ liệu demo); còn gộp `main`, tag `v0.1-demo` |
-| A-10 | API danh mục (chuyển từ B-01): kho và cấu hình, zone, vị trí, nhóm hàng, SKU, mã vạch, NCC, khách hàng, mã lý do, loại thùng | `feature/master-data` | P1 | Xong | #17, #26, #34; danh mục xe: PR A-hoàn thiện |
-| A-11 | Client cho Admin (chuyển từ B-02): màn hình danh mục và quản lý người dùng | `feature/master-data` | P2 | Một phần | Màn hình chỉ đọc: PR A-hoàn thiện; chưa có API ghi `users`, `roles` |
+| A-10 | API danh mục (chuyển từ B-01): kho và cấu hình, zone, vị trí, nhóm hàng, SKU, mã vạch, NCC, khách hàng, mã lý do, loại thùng | `feature/master-data` | P1 | Xong | #17, #26, #34; danh mục xe: #42 |
+| A-11 | Client cho Admin (chuyển từ B-02): màn hình danh mục và quản lý người dùng | `feature/master-data` | P2 | Một phần | Màn hình chỉ đọc: #42; chưa có API ghi `users`, `roles` |
 | A-12 | Dashboard cơ bản (chuyển từ D-07): thẻ số task (TK-2.1), tồn, đơn trong ngày cho BGĐ; cảnh báo đơn giản trong app | `feature/dashboard` | P2 | Xong | #29 |
 | A-13 | Client cho `bgd` (chuyển từ D-08) | `feature/dashboard` | P1 | Xong | #29 |
 
