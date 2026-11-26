@@ -38,6 +38,18 @@ def get_me(
     return success_response(data=result.model_dump())
 
 
+@router.post("/refresh", summary="Làm mới phiên: đổi token còn hạn lấy token mới 8 giờ")
+def refresh_token(
+    request: Request,
+    user_ctx: UserContext = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Token phải còn hạn; tài khoản bị khóa sau khi đăng nhập thì không gia hạn (403)."""
+    client_ip = request.client.host if request.client else None
+    result = AuthService.refresh(db, user_ctx, client_ip=client_ip)
+    return success_response(data=result.model_dump())
+
+
 @router.post("/change-password", summary="Đổi mật khẩu người dùng")
 def change_password(
     req: ChangePasswordRequest,

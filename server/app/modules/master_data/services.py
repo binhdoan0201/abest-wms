@@ -34,6 +34,7 @@ from server.app.modules.master_data.models import (
     Sku,
     SkuBarcode,
     Supplier,
+    Vehicle,
     Warehouse,
     Zone,
 )
@@ -236,6 +237,17 @@ RESOURCE_SPECS: dict[str, ResourceSpec] = {
             code_column="box_code",
             search=("box_code", "box_name"),
             has_is_active=False,
+        ),
+        ResourceSpec(
+            name="vehicles",
+            label="xe",
+            model=Vehicle,
+            pk="vehicle_id",
+            pk_is_uuid=True,
+            scope="global",
+            code_column="license_plate",
+            search=("license_plate", "driver_name", "carrier_name"),
+            filters={"is_active": _parse_bool},
         ),
     )
 }

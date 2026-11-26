@@ -45,8 +45,17 @@ def get_optional_user(request: Request) -> dict[str, Any] | None:
 
 
 # Trang đầu sau đăng nhập: BGĐ vào bảng điều hành (A-13), vai trò khác vào tra cứu tồn.
-HOME_BY_ROLE: dict[str, str] = {"bgd": "/dashboard"}
+HOME_BY_ROLE: dict[str, str] = {"bgd": "/dashboard", "admin": "/master-data"}
 DEFAULT_HOME = "/inventory"
+
+
+def has_permission(user: dict[str, Any], code: str) -> bool:
+    """Người dùng có mã quyền `code` (danh sách quyền trả về từ `/auth/me`)."""
+    for p in user.get("permissions", []):
+        value = p.get("permission_code") if isinstance(p, dict) else p
+        if value == code:
+            return True
+    return False
 
 
 def home_path(user: dict[str, Any] | None) -> str:

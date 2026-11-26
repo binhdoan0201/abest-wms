@@ -36,6 +36,8 @@ class ClientSettings(BaseSettings):
     SESSION_COOKIE_SAMESITE: str = "lax"
     SESSION_COOKIE_HTTPONLY: bool = True
     SESSION_MAX_AGE_SECONDS: int = 8 * 3600  # 8 giờ theo đúng thời hạn 1 ca làm việc
+    # Token còn ít hơn chừng này giây thì middleware tự gọi /auth/refresh (A-03)
+    SESSION_REFRESH_BEFORE_SECONDS: int = 3600
 
     model_config = SettingsConfigDict(
         env_file=ROOT_DIR / ".env",
