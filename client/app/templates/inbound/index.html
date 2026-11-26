@@ -30,7 +30,7 @@
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-600">ASN ID (nếu có)</label>
-          <input type="text" name="asn_id" placeholder="UUID ASN..." class="mt-1 w-full rounded-lg border-slate-300 text-sm" />
+          <input type="text" name="asn_id" placeholder="Mã/ID ASN nếu có..." class="mt-1 w-full rounded-lg border-slate-300 text-sm" />
         </div>
         <button type="submit" class="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">
           Mở phiếu GRN
@@ -102,15 +102,63 @@
     </div>
 
     {% if selected_grn.status == "COUNTING" %}
-    <form method="post" action="/inbound/grns/{{ selected_grn.grn_id }}/lines" class="grid grid-cols-1 md:grid-cols-6 gap-3 bg-slate-50 p-3 rounded-lg">
+    <form method="post" action="/inbound/grns/{{ selected_grn.grn_id }}/lines" class="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-2.5 bg-slate-50 p-3 rounded-lg items-end">
       <input type="hidden" name="version_no" value="{{ selected_grn.version_no }}" />
-      <input type="text" name="sku_id" required placeholder="SKU ID (UUID)" class="rounded border-slate-300 text-sm" />
-      <input type="text" name="lot_number" placeholder="Số lô (Lot)" class="rounded border-slate-300 text-sm" />
-      <input type="date" name="expiry_date" class="rounded border-slate-300 text-sm" />
-      <input type="text" name="uom_code" required value="PCS" placeholder="ĐVT" class="rounded border-slate-300 text-sm" />
-      <input type="text" name="qty_actual" required placeholder="SL thực đếm" class="rounded border-slate-300 text-sm" />
-      <button type="submit" class="bg-blue-600 text-white text-sm font-medium rounded-lg px-3 py-2">+ Ghi dòng</button>
+      <div class="lg:col-span-2">
+        <label class="block text-xs font-medium text-slate-600 mb-1">SKU</label>
+        <select id="grn_sku_select" name="sku_id" required onchange="syncSkuDefaults()" class="w-full rounded border-slate-300 text-sm">
+          {% for opt in sku_options %}
+          <option value="{{ opt.sku_id }}" data-uom="{{ opt.uom_code }}" data-expected="{{ opt.qty_expected if opt.qty_expected is not none else '' }}">
+            {{ opt.sku_code }}{% if opt.sku_name %} – {{ opt.sku_name }}{% endif %}{% if opt.qty_expected is not none %} (PO: {{ opt.qty_expected }}){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Số lô (Lot)</label>
+        <input type="text" name="lot_number" placeholder="LOT-..." class="w-full rounded border-slate-300 text-sm" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Hạn dùng</label>
+        <input type="date" name="expiry_date" class="w-full rounded border-slate-300 text-sm" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">ĐVT</label>
+        <input type="text" id="grn_uom_code" name="uom_code" required value="{{ sku_options[0].uom_code if sku_options and sku_options[0].uom_code else 'SET' }}" class="w-full rounded border-slate-300 text-sm" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">SL thực đếm</label>
+        <input type="text" name="qty_actual" required placeholder="SL thực đếm" class="w-full rounded border-slate-300 text-sm" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">SL hư hỏng</label>
+        <input type="text" name="qty_damaged" value="0" placeholder="0" class="w-full rounded border-slate-300 text-sm" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Mã lý do</label>
+        <select name="reason_code" class="w-full rounded border-slate-300 text-sm">
+          <option value="">-- Không có --</option>
+          {% for rc in reason_codes %}
+          <option value="{{ rc.reason_code }}">{{ rc.reason_code }}{% if rc.description %} – {{ rc.description }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="md:col-span-4 lg:col-span-8 flex justify-end">
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg px-4 py-2">+ Ghi dòng</button>
+      </div>
     </form>
+    <script>
+      function syncSkuDefaults() {
+        var sel = document.getElementById("grn_sku_select");
+        var uomInput = document.getElementById("grn_uom_code");
+        if (!sel || !uomInput) return;
+        var opt = sel.options[sel.selectedIndex];
+        if (opt && opt.dataset.uom) {
+          uomInput.value = opt.dataset.uom;
+        }
+      }
+      document.addEventListener("DOMContentLoaded", syncSkuDefaults);
+    </script>
     {% endif %}
 
     {% if (selected_grn.status in ["NEED_INFO", "DISCREPANCY", "RECOUNTING"] or selected_grn.status.startswith("PENDING_D")) and ("NH-5" in perms or "NH-1" in perms) %}
@@ -129,7 +177,7 @@
         <table class="min-w-full text-sm text-left">
           <thead class="bg-amber-100/60 text-amber-900 border-b">
             <tr>
-              <th class="py-2 px-3">SKU ID</th>
+              <th class="py-2 px-3">Mã SKU</th>
               <th class="py-2 px-3">ĐVT</th>
               <th class="py-2 px-3">SL đếm cũ</th>
               <th class="py-2 px-3">SL thực đếm lại</th>
@@ -139,8 +187,8 @@
           <tbody class="divide-y">
             {% for ln in selected_grn.lines %}
             <tr>
-              <td class="py-2 px-3 font-mono text-xs">
-                {{ ln.sku_id }}
+              <td class="py-2 px-3 font-medium text-slate-800">
+                {{ ln.sku_code or sku_code_map.get(ln.sku_id|string, ln.sku_id) }}
                 <input type="hidden" name="grn_line_id" value="{{ ln.grn_line_id }}" />
               </td>
               <td class="py-2 px-3">{{ ln.uom_code }}</td>
@@ -162,7 +210,7 @@
     <table class="min-w-full text-sm text-left">
       <thead class="bg-slate-50 border-b">
         <tr>
-          <th class="py-2 px-3">SKU ID</th>
+          <th class="py-2 px-3">Mã SKU</th>
           <th class="py-2 px-3">ĐVT</th>
           <th class="py-2 px-3">SL Chứng từ</th>
           <th class="py-2 px-3">SL Thực đếm</th>
@@ -173,7 +221,7 @@
       <tbody class="divide-y">
         {% for ln in selected_grn.lines %}
         <tr>
-          <td class="py-2 px-3 font-mono text-xs">{{ ln.sku_id }}</td>
+          <td class="py-2 px-3 font-medium text-slate-800">{{ ln.sku_code or sku_code_map.get(ln.sku_id|string, ln.sku_id) }}</td>
           <td class="py-2 px-3">{{ ln.uom_code }}</td>
           <td class="py-2 px-3">{{ ln.qty_expected if ln.qty_expected is not none else "(Đếm mù)" }}</td>
           <td class="py-2 px-3 font-semibold">{{ ln.qty_actual }}</td>
@@ -190,9 +238,28 @@
   {% if "CAT-1" in perms %}
   <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
     <h2 class="font-semibold text-slate-800">2. Cất hàng lên kệ (Putaway)</h2>
-    <form method="get" action="/inbound" class="flex flex-wrap gap-3">
-      <input type="text" name="pallet_id" value="{{ pallet_id }}" required placeholder="Nhập hoặc quét Pallet ID (UUID)..." class="flex-1 rounded-lg border-slate-300 text-sm" />
+    <form method="get" action="/inbound" class="flex flex-wrap gap-3 items-center">
+      {% if staged_pallets %}
+      <select name="pallet_id" required class="flex-1 rounded-lg border-slate-300 text-sm">
+        {% for p in staged_pallets %}
+        <option value="{{ p.pallet_id }}" {{ 'selected' if p.pallet_id|string == pallet_id else '' }}>
+          {{ p.pallet_code or p.barcode or p.pallet_id }} (STAGED)
+        </option>
+        {% endfor %}
+      </select>
+      {% elif pallet_id %}
+      <input type="hidden" name="pallet_id" value="{{ pallet_id }}" />
+      <div class="flex-1 px-3 py-2 rounded-lg bg-slate-100 text-sm font-medium text-slate-700">
+        Pallet đang chọn từ tác vụ: <span class="font-mono">{{ pallet_id }}</span>
+      </div>
+      {% else %}
+      <div class="flex-1 px-3 py-2 rounded-lg bg-slate-50 text-sm text-slate-500">
+        Không có pallet STAGED nào (hoặc mở từ link task cất hàng)
+      </div>
+      {% endif %}
+      {% if staged_pallets or pallet_id %}
       <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg">Gợi ý 5 vị trí</button>
+      {% endif %}
     </form>
 
     {% if suggestions %}
@@ -214,9 +281,12 @@
         {% endfor %}
       </div>
 
+      {% if putaway_version_error %}
+      <div class="rounded-lg bg-rose-50 border border-rose-200 p-3 text-sm text-rose-800">{{ putaway_version_error }}</div>
+      {% elif putaway_version_no is not none %}
       <form method="post" action="/inbound/pallets/{{ pallet_id }}/putaway" class="p-3.5 border border-emerald-200 rounded-xl bg-emerald-50/60 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         <input type="hidden" id="putaway_location_id" name="location_id" value="{{ suggestions[0].location_id }}" required />
-        <input type="hidden" name="version_no" value="2" />
+        <input type="hidden" name="version_no" value="{{ putaway_version_no }}" />
         <div class="flex-1">
           <label class="block text-xs font-medium text-slate-600 mb-1">Vị trí đã chọn / Quét mã vạch xác nhận cất hàng</label>
           <input
@@ -231,6 +301,7 @@
           Quét & Xác nhận cất
         </button>
       </form>
+      {% endif %}
     </div>
     <script>
       function selectPutawayLocation(locId, locCode, barcode) {
