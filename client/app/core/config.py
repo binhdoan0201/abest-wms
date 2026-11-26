@@ -14,8 +14,9 @@ class ClientSettings(BaseSettings):
     ENV: str = "development"
     DEBUG: bool = True
 
-    # Backend API Server
-    SERVER_API_URL: str = "http://localhost:8000/api/v1"
+    # Backend API Server. Dùng 127.0.0.1 thay cho localhost: trên Windows, localhost thử IPv6 (::1)
+    # trước trong khi uvicorn chỉ nghe IPv4, mỗi lệnh gọi API chậm thêm khoảng 2 giây.
+    SERVER_API_URL: str = "http://127.0.0.1:8000/api/v1"
 
     # Client Web Server
     CLIENT_HOST: str = "0.0.0.0"
