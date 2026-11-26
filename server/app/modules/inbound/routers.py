@@ -1,23 +1,21 @@
-"""ABEST WMS - Routers cho Phân hệ Nhập kho (Inbound).
-
-Khai báo toàn bộ endpoint theo Mục 4.5 Chuẩn API.
-B-03 (PO, ASN đọc) đã cài đặt; các endpoint còn lại trả HTTP 501 kèm kiểm tra quyền RBAC.
-"""
+"""ABEST WMS - Routers cho Phân hệ Nhập kho (Inbound)."""
 
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 
 from server.app.core.database import DbSession, get_db
-from server.app.core.exceptions import BusinessError
 from server.app.core.rbac import UserContext, get_current_user, require_permission
 from server.app.core.responses import success_response
 from server.app.modules.inbound.schemas import (
+    CompleteGrnRequest,
     CreateGrnRequest,
     GrnLineCountRequest,
     PutawayConfirmRequest,
     PutawaySuggestRequest,
+    RecountGrnRequest,
+    SubmitGrnRequest,
 )
 from server.app.modules.inbound.services import InboundService
 
@@ -68,31 +66,34 @@ def get_asns(
     return success_response(data=items, page=page, page_size=page_size, total=total)
 
 
-@router.post("/grns", summary="Tạo phiếu nhập kho GRN từ PO hoặc ASN")
+@router.post(
+    "/grns",
+    status_code=status.HTTP_201_CREATED,
+    summary="Tạo phiếu nhập kho GRN từ PO hoặc ASN",
+)
 def create_grn(
     req: CreateGrnRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("NH-1")),
+    perm: str = Depends(require_permission("NH-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint POST /grns đang phát triển (TODO: Chủ module B)",
-        http_status=501,
-    )
+    return success_response(data=InboundService.create_grn(db, user_ctx, perm, req))
 
 
 @router.get("/grns", summary="Xem danh sách phiếu nhập kho GRN")
 def get_grns(
+    status: str | None = None,
+    po_id: uuid.UUID | None = None,
+    page: int = 1,
+    page_size: int = 20,
     user_ctx: UserContext = Depends(get_current_user),
     _perm: str = Depends(require_permission("NH-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint GET /grns đang phát triển (TODO: Chủ module B)",
-        http_status=501,
+    items, total, page, page_size = InboundService.list_grns(
+        db, user_ctx, status, po_id, page, page_size
     )
+    return success_response(data=items, page=page, page_size=page_size, total=total)
 
 
 @router.get("/grns/{grn_id}", summary="Xem chi tiết phiếu nhập kho GRN (ẩn tồn nếu đếm mù)")
@@ -102,68 +103,55 @@ def get_grn_by_id(
     _perm: str = Depends(require_permission("NH-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint GET /grns/{id} đang phát triển (TODO: Chủ module B)",
-        http_status=501,
-    )
+    return success_response(data=InboundService.get_grn_detail(db, user_ctx, grn_id))
 
 
-@router.post("/grns/{grn_id}/lines", summary="Ghi một dòng đếm cho GRN")
+@router.post(
+    "/grns/{grn_id}/lines",
+    status_code=status.HTTP_201_CREATED,
+    summary="Ghi một dòng đếm cho GRN",
+)
 def add_grn_line(
     grn_id: uuid.UUID,
     req: GrnLineCountRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("NH-1")),
+    perm: str = Depends(require_permission("NH-2")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint POST /grns/{id}/lines đang phát triển (TODO: Chủ module B)",
-        http_status=501,
-    )
+    return success_response(data=InboundService.add_grn_line(db, user_ctx, perm, grn_id, req))
 
 
 @router.post("/grns/{grn_id}/submit", summary="Chốt đếm và gọi giải quyết tầng duyệt")
 def submit_grn(
     grn_id: uuid.UUID,
+    req: SubmitGrnRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("NH-1")),
+    perm: str = Depends(require_permission("NH-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint POST /grns/{id}/submit đang phát triển (TODO: Chủ module B)",
-        http_status=501,
-    )
+    return success_response(data=InboundService.submit_grn(db, user_ctx, perm, grn_id, req))
 
 
 @router.post("/grns/{grn_id}/recount", summary="Yêu cầu kiểm đếm lại khi có chênh lệch")
 def recount_grn(
     grn_id: uuid.UUID,
+    req: RecountGrnRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("NH-1")),
+    perm: str = Depends(require_permission("NH-5")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint POST /grns/{id}/recount đang phát triển (TODO: Chủ module B)",
-        http_status=501,
-    )
+    return success_response(data=InboundService.recount_grn(db, user_ctx, perm, grn_id, req))
 
 
 @router.post("/grns/{grn_id}/complete", summary="Hoàn tất phiếu nhập: tạo pallet và task cất hàng")
 def complete_grn(
     grn_id: uuid.UUID,
+    req: CompleteGrnRequest,
     user_ctx: UserContext = Depends(get_current_user),
-    _perm: str = Depends(require_permission("NH-1")),
+    perm: str = Depends(require_permission("NH-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint POST /grns/{id}/complete đang phát triển (TODO: Chủ module B)",
-        http_status=501,
-    )
+    return success_response(data=InboundService.complete_grn(db, user_ctx, perm, grn_id, req))
 
 
 @router.post("/putaway/suggest", summary="Gợi ý vị trí cất cho pallet")
@@ -173,11 +161,7 @@ def suggest_putaway_location(
     _perm: str = Depends(require_permission("CAT-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint POST /putaway/suggest đang phát triển (TODO: Chủ module B)",
-        http_status=501,
-    )
+    return success_response(data=InboundService.suggest_putaway(db, user_ctx, req))
 
 
 @router.post("/pallets/{pallet_id}/putaway", summary="Xác nhận cất pallet vào vị trí đích")
@@ -188,8 +172,4 @@ def confirm_pallet_putaway(
     _perm: str = Depends(require_permission("CAT-1")),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    raise BusinessError(
-        code="NOT_IMPLEMENTED",
-        message="Endpoint POST /pallets/{id}/putaway đang phát triển (TODO: Chủ module B)",
-        http_status=501,
-    )
+    return success_response(data=InboundService.confirm_putaway(db, user_ctx, pallet_id, req))

@@ -4,15 +4,15 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateCycleCountRequest(BaseModel):
     """Yêu cầu tạo phiếu kiểm kê và khóa vị trí kiểm."""
 
-    count_type: str = "LOCATION"
+    count_type: str = "PERIODIC"
     due_at: datetime
-    location_ids: list[uuid.UUID]
+    location_ids: list[uuid.UUID] = Field(min_length=1)
 
 
 class RecordCountRequest(BaseModel):
@@ -20,6 +20,7 @@ class RecordCountRequest(BaseModel):
 
     blind_counted_qty: Decimal
     same_counter_override_reason: str | None = None
+    anomaly_type: str | None = None
 
 
 class CycleCountResponse(BaseModel):
