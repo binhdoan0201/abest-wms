@@ -52,7 +52,7 @@
             <td class="px-3 py-3 font-mono text-[11px] text-slate-700">
               {{ t.assigned_to or 'Chưa giao' }}
             </td>
-            <td class="px-3 py-3">
+            <td class="px-3 py-3 space-y-2">
               {% if is_supervisor and t.status not in ['COMPLETED', 'CANCELLED'] %}
               <form hx-post="/tasks/{{ t.task_id }}/dispatch" hx-target="#tasks-board-panel" hx-swap="innerHTML" class="flex flex-wrap items-center gap-1.5">
                 <input type="hidden" name="version_no" value="{{ t.version_no }}">
@@ -78,6 +78,18 @@
                 {% endif %}
                 <button type="submit" name="action" value="cancel" class="rounded bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-700">
                   Hủy
+                </button>
+              </form>
+
+              <form hx-post="/tasks/{{ t.task_id }}/dispatch" hx-target="#tasks-board-panel" hx-swap="innerHTML" class="flex flex-wrap items-center gap-1.5">
+                <input type="hidden" name="version_no" value="{{ t.version_no }}">
+                <select name="priority" class="rounded border border-slate-300 px-2 py-1 text-xs bg-white">
+                  <option value="NORMAL" {% if t.priority == 'NORMAL' %}selected{% endif %}>NORMAL</option>
+                  <option value="HIGH" {% if t.priority == 'HIGH' %}selected{% endif %}>HIGH</option>
+                  <option value="URGENT" {% if t.priority == 'URGENT' %}selected{% endif %}>URGENT</option>
+                </select>
+                <button type="submit" name="action" value="priority" class="rounded bg-slate-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800">
+                  Đổi ưu tiên
                 </button>
               </form>
               {% elif not is_supervisor and t.status in ['ASSIGNED', 'IN_PROGRESS'] %}

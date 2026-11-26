@@ -10,7 +10,7 @@ import json
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 
 from server.app.modules.tasks.models import Task
@@ -43,8 +43,15 @@ class TaskRepository:
         queue_only: bool = False,
     ) -> list[Task]:
         """Lấy danh sách nhiệm vụ có lọc theo kho, người thực hiện, hàng đợi hoặc trạng thái."""
+        priority_rank = case(
+            (Task.priority == "URGENT", 0),
+            (Task.priority == "HIGH", 1),
+            else_=2,
+        )
         stmt = (
-            select(Task).where(Task.warehouse_id == warehouse_id).order_by(Task.created_at.desc())
+            select(Task)
+            .where(Task.warehouse_id == warehouse_id)
+            .order_by(priority_rank.asc(), Task.created_at.desc())
         )
         if queue_only:
             stmt = stmt.where(Task.status.in_(["UNASSIGNED", "REJECTED"]))
@@ -52,6 +59,31 @@ class TaskRepository:
             stmt = stmt.where(Task.assigned_to == assigned_to)
         if status:
             stmt = stmt.where(Task.status == status)
+        return list(db.execute(stmt).scalars().all())
+
+    @staticmethod
+    def get_queue_tasks_for_auto_assign(
+        db: Session,
+        warehouse_id: uuid.UUID,
+        stage: str | None = None,
+    ) -> list[Task]:
+        """Lấy các nhiệm vụ đang chờ trong hàng đợi (UNASSIGNED, REJECTED) theo độ ưu tiên."""
+        priority_rank = case(
+            (Task.priority == "URGENT", 0),
+            (Task.priority == "HIGH", 1),
+            else_=2,
+        )
+        stmt = (
+            select(Task)
+            .where(
+                Task.warehouse_id == warehouse_id,
+                Task.status.in_(["UNASSIGNED", "REJECTED"]),
+            )
+            .order_by(priority_rank.asc(), Task.created_at.asc())
+            .with_for_update()
+        )
+        if stage:
+            stmt = stmt.where(Task.stage == stage)
         return list(db.execute(stmt).scalars().all())
 
     @staticmethod
@@ -116,3 +148,48 @@ class TaskRepository:
             .one_or_none()
         )
         return dict(row) if row is not None else None
+
+    @staticmethod
+    def list_stage_candidates_for_auto_assign(
+        db: Session,
+        warehouse_id: uuid.UUID,
+        stage: str,
+    ) -> list[dict[str, Any]]:
+        """Lấy danh sách nhân viên trong kho cùng khâu, đang ACTIVE và số task mở hiện tại."""
+        rows = (
+            db.execute(
+                text(
+                    """
+                    SELECT
+                        u.user_id,
+                        u.username,
+                        u.primary_warehouse_id,
+                        u.primary_stage::text AS primary_stage,
+                        u.status::text AS status,
+                        u.is_seasonal,
+                        u.valid_from,
+                        u.valid_until,
+                        u.is_safety_checked,
+                        r.role_code,
+                        (
+                            SELECT COUNT(*)
+                            FROM tasks t
+                            WHERE t.warehouse_id = :w
+                              AND t.assigned_to = u.user_id
+                              AND t.status IN ('ASSIGNED', 'IN_PROGRESS', 'PAUSED_OFFLINE')
+                        ) AS open_tasks
+                    FROM users u
+                    JOIN roles r ON r.role_id = u.primary_role_id
+                    WHERE u.primary_warehouse_id = :w
+                      AND u.primary_stage::text = :stage
+                      AND u.status::text = 'ACTIVE'
+                    ORDER BY open_tasks ASC, u.username ASC
+                    FOR UPDATE OF u
+                    """
+                ),
+                {"w": warehouse_id, "stage": stage},
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(r) for r in rows]

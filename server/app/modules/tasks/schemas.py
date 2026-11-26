@@ -50,6 +50,10 @@ class CreateTaskRequest(BaseModel):
     ref_doc_id: uuid.UUID = Field(..., description="ID chứng từ tham chiếu")
     zone_id: uuid.UUID | None = None
     priority: TaskPriorityLiteral = Field("NORMAL", description="Độ ưu tiên: NORMAL, HIGH, URGENT")
+    auto_assign: bool = Field(
+        default=False,
+        description="Tự động giao nhiệm vụ cho nhân viên phù hợp ít việc nhất khi tạo mới",
+    )
 
 
 class AssignTaskRequest(BaseModel):
@@ -65,6 +69,21 @@ class ReassignTaskRequest(BaseModel):
     new_assigned_to_user_id: uuid.UUID = Field(..., description="ID nhân viên nhận việc mới")
     reason: str | None = Field(None, description="Lý do điều chuyển")
     version_no: int = Field(..., description="Phiên bản lạc quan hiện tại")
+
+
+class UpdateTaskPriorityRequest(BaseModel):
+    """Dữ liệu yêu cầu thay đổi mức độ ưu tiên của nhiệm vụ (D-02)."""
+
+    priority: TaskPriorityLiteral = Field(..., description="Độ ưu tiên mới: NORMAL, HIGH, URGENT")
+    version_no: int = Field(..., description="Phiên bản lạc quan hiện tại")
+
+
+class AutoAssignTasksRequest(BaseModel):
+    """Dữ liệu yêu cầu tự động phân công các nhiệm vụ đang chờ trong kho (D-02)."""
+
+    stage: WorkStageLiteral | None = Field(
+        None, description="Lọc theo công đoạn (nếu để trống sẽ tự động giao mọi khâu)"
+    )
 
 
 class AcceptTaskRequest(BaseModel):
