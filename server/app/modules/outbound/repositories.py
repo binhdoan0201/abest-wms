@@ -292,7 +292,10 @@ class OutboundRepository:
                   OR lt.expiry_date IS NULL
                   OR (
                       lt.expiry_date >= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-                      AND (CAST(:min_expiry_date AS date) IS NULL OR lt.expiry_date >= CAST(:min_expiry_date AS date))
+                      AND (
+                          CAST(:min_expiry_date AS date) IS NULL
+                          OR lt.expiry_date >= CAST(:min_expiry_date AS date)
+                      )
                   )
               )
             ORDER BY {order_by}
