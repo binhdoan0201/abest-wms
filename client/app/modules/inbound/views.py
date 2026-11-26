@@ -13,6 +13,8 @@ from client.app.core.session import get_session_token
 
 router = APIRouter(tags=["Inbound Views"])
 
+ALLOWED_REASON_CATEGORIES = {"DAMAGED", "DISCREPANCY"}
+
 
 def _tpl(request: Request) -> Jinja2Templates:
     templates: Jinja2Templates = request.app.state.templates
@@ -87,7 +89,8 @@ def inbound_index(
     reason_codes: list[dict[str, Any]] = []
     sku_code_map: dict[str, str] = {}
     staged_pallets: list[dict[str, Any]] = []
-    putaway_version_no = 1
+    putaway_version_no: int | None = None
+    putaway_version_error: str | None = None
     suggestions: list[dict[str, Any]] = []
     api_err = err
 
@@ -103,7 +106,7 @@ def inbound_index(
             except ClientApiError as exc:
                 api_err = exc.message
 
-        all_skus = _safe_list(api, "/skus", {"page_size": 200})
+        all_skus = _safe_list(api, "/skus", {"page_size": 100})
         for s in all_skus:
             sid = str(s.get("sku_id") or "")
             scode = str(s.get("sku_code") or "")
@@ -121,7 +124,13 @@ def inbound_index(
                     }
                 )
 
-        reason_codes = _safe_list(api, "/reason-codes", {"is_active": "true", "page_size": 100})
+        raw_reasons = _safe_list(api, "/reason-codes", {"is_active": "true", "page_size": 100})
+        reason_codes = [
+            rc
+            for rc in raw_reasons
+            if str(rc.get("reason_category") or rc.get("category") or "").upper()
+            in ALLOWED_REASON_CATEGORIES
+        ]
 
         if isinstance(selected_grn, dict):
             po_id_val = selected_grn.get("po_id")
@@ -159,27 +168,31 @@ def inbound_index(
                         sku_code_map[sid] = str(ln.get("sku_code") or sid)
 
     if "CAT-1" in perms:
-        all_pallets = _safe_list(api, "/pallets")
-        staged_pallets = [p for p in all_pallets if str(p.get("status") or "").upper() == "STAGED"]
+        staged_pallets = _safe_list(api, "/pallets", {"status": "STAGED"})
         active_pallet_id = (pallet_id or "").strip()
         if active_pallet_id:
             p_detail = _safe_dict(api, f"/pallets/{active_pallet_id}")
+            raw_ver: Any = None
             if isinstance(p_detail, dict) and p_detail.get("version_no") is not None:
-                try:
-                    putaway_version_no = int(p_detail["version_no"])
-                except (TypeError, ValueError):
-                    putaway_version_no = 1
+                raw_ver = p_detail["version_no"]
             else:
                 for p in staged_pallets:
                     if (
                         str(p.get("pallet_id") or "") == active_pallet_id
                         and p.get("version_no") is not None
                     ):
-                        try:
-                            putaway_version_no = int(p["version_no"])
-                        except (TypeError, ValueError):
-                            putaway_version_no = 1
+                        raw_ver = p["version_no"]
                         break
+            if raw_ver is not None:
+                try:
+                    putaway_version_no = int(raw_ver)
+                except (TypeError, ValueError):
+                    putaway_version_no = None
+            if putaway_version_no is None:
+                putaway_version_error = (
+                    "Không lấy được phiên bản (version_no) hiện tại của pallet từ hệ thống."
+                )
+
             try:
                 raw_suggestions = (
                     api.post("/putaway/suggest", json_data={"pallet_id": active_pallet_id})
@@ -207,6 +220,7 @@ def inbound_index(
             "sku_code_map": sku_code_map,
             "staged_pallets": staged_pallets,
             "putaway_version_no": putaway_version_no,
+            "putaway_version_error": putaway_version_error,
             "pallet_id": pallet_id or "",
             "suggestions": suggestions,
             "flash_msg": msg,
@@ -357,7 +371,7 @@ def inbound_confirm_putaway(
     request: Request,
     pallet_id: str,
     location_id: str = Form(...),
-    version_no: int = Form(default=1),
+    version_no: int = Form(...),
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Response:
     api = ApiClient(token=get_session_token(request))

@@ -281,6 +281,9 @@
         {% endfor %}
       </div>
 
+      {% if putaway_version_error %}
+      <div class="rounded-lg bg-rose-50 border border-rose-200 p-3 text-sm text-rose-800">{{ putaway_version_error }}</div>
+      {% elif putaway_version_no is not none %}
       <form method="post" action="/inbound/pallets/{{ pallet_id }}/putaway" class="p-3.5 border border-emerald-200 rounded-xl bg-emerald-50/60 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
         <input type="hidden" id="putaway_location_id" name="location_id" value="{{ suggestions[0].location_id }}" required />
         <input type="hidden" name="version_no" value="{{ putaway_version_no }}" />
@@ -298,6 +301,7 @@
           Quét & Xác nhận cất
         </button>
       </form>
+      {% endif %}
     </div>
     <script>
       function selectPutawayLocation(locId, locCode, barcode) {

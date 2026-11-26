@@ -84,14 +84,14 @@ def cycle_count_index(
     except ClientApiError as exc:
         api_err = exc.message
 
-    locations = _safe_list(api, "/locations", {"page_size": 200})
+    locations = _safe_list(api, "/locations", {"page_size": 100})
     for loc in locations:
         lid = str(loc.get("location_id") or "")
         lcode = str(loc.get("location_code") or loc.get("code") or "")
         if lid and lcode:
             location_code_map[lid] = lcode
 
-    for sku in _safe_list(api, "/skus", {"page_size": 200}):
+    for sku in _safe_list(api, "/skus", {"page_size": 100}):
         sid = str(sku.get("sku_id") or "")
         scode = str(sku.get("sku_code") or "")
         if sid and scode:

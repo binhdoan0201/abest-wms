@@ -20,8 +20,13 @@ WAREHOUSE_ID = uuid.UUID("a0000000-0000-0000-0000-000000000001")
 
 @pytest.fixture(autouse=True)
 def in_memory_backend() -> Generator[None, None, None]:
+    from client.app.core.config import get_client_settings
+
     original = ApiClient.backend_app
+    settings = get_client_settings()
+    orig_url = settings.SERVER_API_URL
     ApiClient.backend_app = backend_app
+    settings.SERVER_API_URL = "http://testserver/api/v1"
     db = SessionLocal()
     try:
         add_second_receiver(db)
@@ -31,6 +36,7 @@ def in_memory_backend() -> Generator[None, None, None]:
         db.close()
     yield
     ApiClient.backend_app = original
+    settings.SERVER_API_URL = orig_url
 
 
 @pytest.fixture
@@ -412,3 +418,96 @@ def test_b3_cycle_count_recount_ui_flow(web: TestClient, api: TestClient) -> Non
             db.commit()
         finally:
             db.close()
+
+
+def test_b2_putaway_nv_cat_version_and_confirm_ui(web: TestClient, api: TestClient) -> None:
+    """nv_cat mở /inbound?pallet_id=... lấy version_no thật và cất hàng thành công."""
+    nhan_h = _api_headers(api, "nv_nhan")
+    cat_cookie = _web_login(web, "nv_cat")
+
+    db = SessionLocal()
+    try:
+        sku_id = db.execute(
+            text("SELECT sku_id FROM skus WHERE sku_code = 'SKU-GEN-008' LIMIT 1;")
+        ).scalar_one()
+    finally:
+        db.close()
+
+    po_id = None
+    grn_id = None
+    try:
+        db_po = SessionLocal()
+        try:
+            po_id = _create_test_po(db_po, "PO-CAT", sku_id, "SET", 10)
+        finally:
+            db_po.close()
+
+        r_grn = api.post("/api/v1/grns", headers=nhan_h, json={"po_id": str(po_id)})
+        assert r_grn.status_code == 201, r_grn.text
+        grn_data = r_grn.json()["data"]
+        grn_id = uuid.UUID(grn_data["grn_id"])
+
+        r_line = api.post(
+            f"/api/v1/grns/{grn_id}/lines",
+            headers=nhan_h,
+            json={
+                "sku_id": str(sku_id),
+                "uom_code": "SET",
+                "qty_actual": "10",
+                "qty_damaged": "0",
+                "version_no": grn_data["version_no"],
+            },
+        )
+        assert r_line.status_code == 201, r_line.text
+
+        v_sub = api.get(f"/api/v1/grns/{grn_id}", headers=nhan_h).json()["data"]["version_no"]
+        r_sub = api.post(
+            f"/api/v1/grns/{grn_id}/submit",
+            headers=nhan_h,
+            json={"version_no": v_sub},
+        )
+        assert r_sub.status_code == 200, r_sub.text
+
+        r_done = api.post(
+            f"/api/v1/grns/{grn_id}/complete",
+            headers=nhan_h,
+            json={"version_no": r_sub.json()["data"]["version_no"]},
+        )
+        assert r_done.status_code == 200, r_done.text
+        pallet_id = r_done.json()["data"]["pallets"][0]["pallet_id"]
+
+        thukho_h = _api_headers(api, "thukho")
+        pallet_detail = api.get(f"/api/v1/pallets/{pallet_id}", headers=thukho_h).json()["data"]
+        real_version_no = int(pallet_detail["version_no"])
+
+        page = web.get(
+            f"/inbound?pallet_id={pallet_id}",
+            cookies={"abest_session": cat_cookie},
+        )
+        assert page.status_code == 200
+        assert f'name="version_no" value="{real_version_no}"' in page.text
+        assert "Quét & Xác nhận cất" in page.text
+
+        sugg = api.post(
+            "/api/v1/putaway/suggest",
+            headers=_api_headers(api, "nv_cat"),
+            json={"pallet_id": pallet_id},
+        ).json()["data"]["suggestions"][0]
+
+        post_putaway = web.post(
+            f"/inbound/pallets/{pallet_id}/putaway",
+            cookies={"abest_session": cat_cookie},
+            headers=ORIGIN,
+            data={
+                "location_id": sugg["location_id"],
+                "version_no": str(real_version_no),
+            },
+            follow_redirects=False,
+        )
+        assert post_putaway.status_code == 303
+        assert "err=" not in (post_putaway.headers.get("location") or "")
+
+        pallet_after = api.get(f"/api/v1/pallets/{pallet_id}", headers=thukho_h).json()["data"]
+        assert pallet_after["status"] == "STORED"
+    finally:
+        _cleanup_po_grn(po_id, grn_id)
