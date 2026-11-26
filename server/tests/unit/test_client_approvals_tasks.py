@@ -296,9 +296,28 @@ def test_tasks_access_and_supervisor_dispatch_htmx(
     assert cancelled.status_code == 200
     assert "Đã hủy nhiệm vụ." in cancelled.text
 
+    prio_res = web.post(
+        f"/tasks/{task_id}/dispatch",
+        data={"action": "priority", "version_no": "4", "priority": "URGENT"},
+        headers={"HX-Request": "true", **ORIGIN},
+        cookies={"abest_session": thukho_cookie},
+    )
+    assert prio_res.status_code == 200
+    assert "URGENT" in prio_res.text
+
+    auto_res = web.post(
+        "/tasks/auto-assign",
+        data={"stage": "SOAN_HANG"},
+        headers={"HX-Request": "true", **ORIGIN},
+        cookies={"abest_session": thukho_cookie},
+    )
+    assert auto_res.status_code == 200
+
     assert [p[0] for p in posted] == [
         "/tasks",
         f"/tasks/{task_id}/assign",
         f"/tasks/{task_id}/reassign",
         f"/tasks/{task_id}/cancel",
+        f"/tasks/{task_id}/priority",
+        "/tasks/auto-assign",
     ]
