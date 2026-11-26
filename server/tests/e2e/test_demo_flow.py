@@ -63,6 +63,24 @@ def _prepare_and_cleanup() -> Iterator[None]:
                 text("DELETE FROM integration_sync_logs WHERE doc_id = ANY(:ids)"),
                 {"ids": _created_docs},
             )
+            # Dòng cấp phát (đã xuất xong, còn 0) giữ khóa ngoại tới inventory_balances; test khác
+            # dọn tồn theo vị trí sẽ vướng nếu vị trí cất hàng của kịch bản trùng vị trí của chúng.
+            alloc_scope = (
+                "SELECT ia.allocation_id FROM inventory_allocations ia "
+                "JOIN outbound_order_lines ol ON ol.order_line_id = ia.order_line_id "
+                "WHERE ol.order_id = ANY(:ids)"
+            )
+            db.execute(
+                text(
+                    f"UPDATE pick_lines SET allocation_id = NULL "
+                    f"WHERE allocation_id IN ({alloc_scope})"
+                ),
+                {"ids": _created_docs},
+            )
+            db.execute(
+                text(f"DELETE FROM inventory_allocations WHERE allocation_id IN ({alloc_scope})"),
+                {"ids": _created_docs},
+            )
             db.commit()
     finally:
         db.close()
