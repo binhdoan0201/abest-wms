@@ -132,6 +132,11 @@ make db-reset
 .\make.bat db-reset
 # (hoặc: bash scripts/reset_db.sh)
 
+# Nạp thêm dữ liệu cho buổi demo (sau reset; không dùng trong CI):
+python -m scripts.load_demo
+# -> tài khoản nv_nhan2 (đếm lại GRN phải khác người), tồn mẫu trên kệ dãy A02
+#    (lô cận date, lô hết hạn, hàng không lô). Kịch bản: docs/demo/kich-ban-demo.md
+
 # Chạy bài kiểm thử CSDL:
 # Trên Linux/macOS:
 make db-test
