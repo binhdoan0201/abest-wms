@@ -34,13 +34,15 @@ def in_memory_backend() -> Generator[None, None, None]:
 
 
 @pytest.fixture
-def web() -> TestClient:
-    return TestClient(client_app, base_url="http://localhost:3000")
+def web() -> Generator[TestClient, None, None]:
+    with TestClient(client_app, base_url="http://localhost:3000") as client:
+        yield client
 
 
 @pytest.fixture
-def api() -> TestClient:
-    return TestClient(backend_app)
+def api() -> Generator[TestClient, None, None]:
+    with TestClient(backend_app) as client:
+        yield client
 
 
 def _web_login(web: TestClient, username: str) -> str:
