@@ -396,6 +396,14 @@ class CycleCountService:
                         performed_by=user.user_id,
                     )
                     ln.status = "ADJUSTED"
+                    mark_object_approval_executed(
+                        db=db,
+                        warehouse_id=warehouse_id,
+                        object_type="CYCLE_COUNT_DIFF",
+                        object_id=ln.count_line_id,
+                        actor_user_id=user.user_id,
+                        note="Ghi tồn điều chỉnh kiểm kê sau duyệt",
+                    )
                 elif ln.status == "PENDING":
                     ln.status = "REJECTED"
 
@@ -403,14 +411,6 @@ class CycleCountService:
             sheet.status = "CLOSED"
             sheet.closed_at = datetime.now(timezone.utc)
             sheet.version_no += 1
-            mark_object_approval_executed(
-                db=db,
-                warehouse_id=warehouse_id,
-                object_type="CYCLE_COUNT_DIFF",
-                object_id=sheet.count_sheet_id,
-                actor_user_id=user.user_id,
-                note="Đóng phiếu kiểm kê và ghi tồn điều chỉnh sau duyệt",
-            )
             db.flush()
 
         create_audit_log(
