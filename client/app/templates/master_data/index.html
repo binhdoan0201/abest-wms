@@ -1,0 +1,72 @@
+{% extends "_base/layout.html" %}
+
+{% block title %}Dữ Liệu Nguồn | ABEST WMS{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+    <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <h1 class="text-xl sm:text-2xl font-black text-slate-800 tracking-tight">Dữ Liệu Nguồn</h1>
+        <p class="text-xs sm:text-sm text-slate-500 mt-0.5">
+            Danh mục kho, vị trí, SKU, đối tác và người dùng (chỉ xem). Thêm, sửa qua API <code>/api/v1/{danh-mục}</code>.
+        </p>
+    </div>
+
+    <nav class="flex gap-1 overflow-x-auto pb-1 text-xs sm:text-sm" aria-label="Danh mục">
+        {% for key, name in tabs %}
+        <a href="/master-data?res={{ key }}"
+           class="whitespace-nowrap px-3 py-2 rounded-xl font-semibold {% if key == resource %}bg-indigo-600 text-white{% else %}bg-white border border-slate-200 text-slate-600 hover:bg-slate-50{% endif %}">{{ name }}</a>
+        {% endfor %}
+    </nav>
+
+    <form method="get" action="/master-data" class="flex gap-2">
+        <input type="hidden" name="res" value="{{ resource }}">
+        <label for="md-search" class="sr-only">Tìm trong {{ label }}</label>
+        <input id="md-search" type="search" name="q" value="{{ q }}" placeholder="Tìm theo mã hoặc tên…"
+               class="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-sm">Tìm</button>
+    </form>
+
+    {% if api_error %}
+    <div class="bg-rose-50 border-l-4 border-rose-500 p-3 rounded-r-xl text-sm text-rose-700" role="alert">
+        Không tải được {{ label }} ({{ api_error.code }}): {{ api_error.message }}
+    </div>
+    {% endif %}
+
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table class="min-w-full divide-y divide-slate-200 text-left text-xs sm:text-sm">
+            <caption class="text-left px-3 pt-3 text-[11px] font-bold uppercase text-slate-500">{{ label }} – {{ total }} bản ghi</caption>
+            <thead class="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                <tr>
+                    {% for h in headers %}<th scope="col" class="px-3 py-3">{{ h }}</th>{% endfor %}
+                    {% if has_active %}<th scope="col" class="px-3 py-3 text-center">Sử dụng</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for row in table %}
+                <tr class="hover:bg-slate-50/80">
+                    {% for c in row.cells %}
+                    <td class="px-3 py-2 {% if loop.first %}font-mono font-bold text-indigo-700 whitespace-nowrap{% else %}text-slate-700{% endif %}">{{ c }}</td>
+                    {% endfor %}
+                    {% if has_active %}
+                    <td class="px-3 py-2 text-center">
+                        {% if row.active %}<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">Đang dùng</span>
+                        {% else %}<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600">Ngừng</span>{% endif %}
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="{{ headers|length + 1 }}" class="px-4 py-8 text-center text-slate-400">Không có bản ghi phù hợp.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if has_prev or has_next %}
+    <div class="flex justify-between text-sm">
+        {% if has_prev %}<a href="/master-data?res={{ resource }}&q={{ q }}&page={{ page - 1 }}" class="px-4 py-2 rounded-xl bg-white border border-slate-200">← Trang trước</a>{% else %}<span></span>{% endif %}
+        <span class="px-2 py-2 text-slate-500">Trang {{ page }}</span>
+        {% if has_next %}<a href="/master-data?res={{ resource }}&q={{ q }}&page={{ page + 1 }}" class="px-4 py-2 rounded-xl bg-white border border-slate-200">Trang sau →</a>{% else %}<span></span>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

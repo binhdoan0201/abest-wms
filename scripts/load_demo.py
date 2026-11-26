@@ -5,8 +5,9 @@
 Chạy lại nhiều lần an toàn: phần nào đã có thì bỏ qua.
 
 Nạp gì:
-- Tài khoản `nv_nhan2` (nv-nhan, kho WH01, cùng mật khẩu demo): đếm lại GRN bắt buộc người khác
-  người đếm trước (NH-5), seed gốc chỉ có một `nv_nhan`.
+- Tài khoản `nv_nhan2`, `nv_kiemke2` (kho WH01, cùng mật khẩu demo): đếm lại GRN (NH-5) và
+  đếm lại kiểm kê bắt buộc người khác người đếm trước, seed gốc chỉ có một người mỗi vai trò.
+- Xe và tài xế mẫu nằm trong seed gốc `02_master_demo.sql` (danh mục `vehicles`).
 - Tồn trên kệ dãy A02 qua `apply_movement` (`RECEIVE`), nên sổ cái và trạng thái vị trí khớp
   như hàng nhập thật:
     * Sữa SKU-FOOD-001: lô DEMO-SUA-A hết hạn sau 6 ngày (cảnh báo cận date, FEFO lấy trước)
@@ -31,6 +32,27 @@ WAREHOUSE_CODE = "WH01"
 DEMO_REF_TYPE = "DEMO_SEED"
 DEMO_REF_ID = uuid.UUID("d0000000-0000-0000-0000-000000000001")
 SECOND_RECEIVER_ID = uuid.UUID("c0000000-0000-0000-0000-000000000010")
+SECOND_COUNTER_ID = uuid.UUID("c0000000-0000-0000-0000-000000000011")
+
+# (username mới, sao chép từ, user_id, họ tên, email, điện thoại)
+DEMO_USERS: list[tuple[str, str, uuid.UUID, str, str, str]] = [
+    (
+        "nv_nhan2",
+        "nv_nhan",
+        SECOND_RECEIVER_ID,
+        "Ngô Thị Nhận Hai",
+        "nv_nhan2@abest-wms.local",
+        "0901000010",
+    ),
+    (
+        "nv_kiemke2",
+        "nv_kiemke",
+        SECOND_COUNTER_ID,
+        "Đặng Văn Kiểm Hai",
+        "nv_kiemke2@abest-wms.local",
+        "0901000011",
+    ),
+]
 
 # (sku_code, lot_number hoặc None, số ngày tới hạn hoặc None, số lượng, vị trí)
 DEMO_STOCK: list[tuple[str, str | None, int | None, int, str]] = [
@@ -46,9 +68,11 @@ def _one(db: Session, sql: str, **params: object) -> object:
     return db.execute(text(sql), params).scalar_one()
 
 
-def add_second_receiver(db: Session) -> bool:
-    """Tạo `nv_nhan2` bằng cách sao chép hồ sơ `nv_nhan` (vai trò, kho, khâu, mật khẩu)."""
-    exists = db.execute(text("SELECT 1 FROM users WHERE username = 'nv_nhan2'")).first()
+def _copy_user(
+    db: Session, username: str, source: str, user_id: uuid.UUID, name: str, email: str, phone: str
+) -> bool:
+    """Tạo tài khoản bằng cách sao chép hồ sơ `source` (vai trò, kho, khâu, mật khẩu)."""
+    exists = db.execute(text("SELECT 1 FROM users WHERE username = :u"), {"u": username}).first()
     if exists:
         return False
     db.execute(
@@ -57,15 +81,35 @@ def add_second_receiver(db: Session) -> bool:
             INSERT INTO users (user_id, username, full_name, email, phone, auth_provider,
                                password_hash, must_change_password, primary_warehouse_id,
                                primary_role_id, primary_stage, status)
-            SELECT :uid, 'nv_nhan2', 'Ngô Thị Nhận Hai', 'nv_nhan2@abest-wms.local',
-                   '0901000010', auth_provider, password_hash, FALSE, primary_warehouse_id,
-                   primary_role_id, primary_stage, 'ACTIVE'
-            FROM users WHERE username = 'nv_nhan'
+            SELECT :uid, :username, :name, :email, :phone, auth_provider, password_hash, FALSE,
+                   primary_warehouse_id, primary_role_id, primary_stage, 'ACTIVE'
+            FROM users WHERE username = :source
             """
         ),
-        {"uid": SECOND_RECEIVER_ID},
+        {
+            "uid": user_id,
+            "username": username,
+            "name": name,
+            "email": email,
+            "phone": phone,
+            "source": source,
+        },
     )
     return True
+
+
+def add_demo_users(db: Session) -> list[str]:
+    """Tạo các tài khoản thứ hai cho bước đếm lại; trả về tên đã tạo mới."""
+    return [
+        username
+        for username, source, user_id, name, email, phone in DEMO_USERS
+        if _copy_user(db, username, source, user_id, name, email, phone)
+    ]
+
+
+def add_second_receiver(db: Session) -> bool:
+    """Chỉ tạo `nv_nhan2` (test e2e dùng)."""
+    return _copy_user(db, *DEMO_USERS[0])
 
 
 def add_demo_stock(db: Session) -> int:
@@ -131,7 +175,7 @@ def add_demo_stock(db: Session) -> int:
 def main() -> None:
     db = SessionLocal()
     try:
-        created_user = add_second_receiver(db)
+        created_users = add_demo_users(db)
         added_stock = add_demo_stock(db)
         db.commit()
     except Exception:
@@ -140,9 +184,9 @@ def main() -> None:
     finally:
         db.close()
     print("== Dữ liệu demo ABEST WMS ==")
-    print(
-        f"- nv_nhan2: {'đã tạo' if created_user else 'đã có, bỏ qua'} (mật khẩu demo như nv_nhan)"
-    )
+    for username, source, *_ in DEMO_USERS:
+        state = "đã tạo" if username in created_users else "đã có, bỏ qua"
+        print(f"- {username}: {state} (cùng vai trò, mật khẩu demo như {source})")
     print(f"- Tồn demo: nhập {added_stock}/{len(DEMO_STOCK)} dòng (dòng đã có hàng thì bỏ qua)")
     for sku_code, lot_number, days, qty, location_code in DEMO_STOCK:
         lot = (
