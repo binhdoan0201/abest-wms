@@ -14,13 +14,22 @@
   {% if "TK-1.1" in perms %}
   <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 space-y-3">
     <h2 class="font-semibold text-slate-700">Tạo phiếu kiểm kê mới (Thủ kho)</h2>
-    <form method="post" action="/cycle-count/create" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+    <form method="post" action="/cycle-count/create" class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
       <select name="count_type" class="rounded-lg border-slate-300 text-sm">
         <option value="PERIODIC">Định kỳ (PERIODIC)</option>
         <option value="RANDOM">Ngẫu nhiên (RANDOM)</option>
       </select>
-      <input type="text" name="location_ids_raw" required placeholder="Danh sách Location UUID (cách nhau dấu phẩy)" class="rounded-lg border-slate-300 text-sm" />
-      <button type="submit" class="bg-blue-600 text-white text-sm font-medium rounded-lg px-4 py-2">Tạo & Khóa vị trí</button>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Chọn vị trí kiểm kê (giữ Ctrl/Cmd hoặc click chọn nhiều)</label>
+        <select name="location_ids" multiple size="4" required class="w-full rounded-lg border-slate-300 text-sm">
+          {% for loc in locations %}
+          <option value="{{ loc.location_id }}">
+            {{ loc.location_code or loc.code }}{% if loc.zone_code %} ({{ loc.zone_code }}){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg px-4 py-2">Tạo & Khóa vị trí</button>
     </form>
   </div>
   {% endif %}
@@ -61,11 +70,11 @@
       {% set is_recount = (ln.status not in ["PENDING", "AUTO_APPROVED_Z", "APPROVED", "ADJUSTED", "REJECTED"]) %}
       <div class="p-3.5 border rounded-xl {{ 'bg-amber-50/70 border-amber-200' if is_recount else 'bg-slate-50' }} space-y-2">
         <div class="flex justify-between text-xs text-slate-600">
-          <span>Vị trí: <strong class="font-mono">{{ ln.location_id }}</strong></span>
+          <span>Vị trí: <strong>{{ ln.location_code or location_code_map.get(ln.location_id|string, ln.location_id) }}</strong></span>
           <span class="px-2 py-0.5 rounded bg-white border font-medium">{{ ln.status }}</span>
         </div>
         <div class="text-xs text-slate-500">
-          SKU: <span class="font-mono">{{ ln.sku_id or "Vị trí trống" }}</span> |
+          SKU: <strong>{{ ln.sku_code or sku_code_map.get(ln.sku_id|string, ln.sku_id) if ln.sku_id else "Vị trí trống" }}</strong> |
           Tồn sổ sách: <strong>{{ ln.system_qty_snapshot if ln.system_qty_snapshot is not none else "ẨN (Đếm mù)" }}</strong>
           {% if ln.variance_qty is not none %}
           | Chênh lệch: <strong class="text-rose-600">{{ ln.variance_qty }}</strong>

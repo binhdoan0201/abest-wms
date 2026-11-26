@@ -95,17 +95,21 @@ def get_lots(
 
 @router.get("/pallets", summary="Danh sách Pallet")
 def get_pallets(
+    status: str | None = None,
     user_ctx: UserContext = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Danh sách Pallet trong kho (thukho, quanly)."""
-    if user_ctx.role_code not in ("thukho", "quanly"):
+    """Danh sách Pallet trong kho (thukho, quanly, nv_cat)."""
+    if user_ctx.role_code not in ("thukho", "quanly", "nv-cat", "nv_cat"):
         raise BusinessError(code="FORBIDDEN", message="Không có quyền truy cập", http_status=403)
 
     if not user_ctx.warehouse_id:
         raise BusinessError(code="NOT_FOUND", message="Chưa gán kho", http_status=404)
 
     pallets = InventoryService.get_pallets(db=db, warehouse_id=user_ctx.warehouse_id)
+    if status:
+        target_status = status.strip().upper()
+        pallets = [p for p in pallets if str(p.status).upper() == target_status]
     return success_response(data=[p.model_dump() for p in pallets], total=len(pallets))
 
 
@@ -115,8 +119,8 @@ def get_pallet_detail(
     user_ctx: UserContext = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Chi tiết một Pallet (thukho, quanly)."""
-    if user_ctx.role_code not in ("thukho", "quanly"):
+    """Chi tiết một Pallet (thukho, quanly, nv_cat)."""
+    if user_ctx.role_code not in ("thukho", "quanly", "nv-cat", "nv_cat"):
         raise BusinessError(code="FORBIDDEN", message="Không có quyền truy cập", http_status=403)
 
     if not user_ctx.warehouse_id:
