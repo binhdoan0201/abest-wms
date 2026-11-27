@@ -38,7 +38,8 @@ class ApiClient:
         timeout: float = 10.0,
     ) -> None:
         self.token = token
-        self.base_url = (base_url or settings.SERVER_API_URL).rstrip("/")
+        effective_base = base_url if base_url is not None else get_client_settings().SERVER_API_URL
+        self.base_url = effective_base.rstrip("/")
         self.timeout = timeout
 
     def _get_headers(self) -> dict[str, str]:
