@@ -71,6 +71,48 @@ def test_dashboard_refresh_htmx_returns_panels(web: TestClient) -> None:
 
 def test_dashboard_forbidden_for_staff(web: TestClient) -> None:
     location, cookie = _login(web, "nv_nhan")
-    assert location == "/inventory"
+    assert location == "/inbound"
     resp = web.get("/dashboard", cookies={"abest_session": cookie})
     assert resp.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("username", "home"),
+    [
+        ("nv_nhan", "/inbound"),
+        ("nv_cat", "/inbound"),
+        ("nv_soan", "/outbound/picking"),
+        ("nv_dongoi", "/outbound/packing"),
+        ("nv_kiemke", "/cycle-count"),
+        ("thukho", "/inventory"),
+    ],
+)
+def test_staff_land_on_their_own_screen_without_error(
+    web: TestClient, username: str, home: str
+) -> None:
+    """Mỗi vai trò vào thẳng màn hình chính; nv_kiemke không còn rơi vào trang tồn bị 403."""
+    location, cookie = _login(web, username)
+    assert location == home
+    resp = web.get(home, cookies={"abest_session": cookie})
+    assert resp.status_code == 200
+    assert "FORBIDDEN" not in resp.text and "QL-1.1" not in resp.text
+
+
+def test_open_tasks_by_stage_show_vietnamese_labels() -> None:
+    template = client_app.state.templates.env.get_template("dashboard/_panels.html")
+    tasks: dict[str, object] = {
+        "open_total": 2,
+        "open_unassigned": 1,
+        "in_progress": 0,
+        "overdue": 0,
+        "urgent_open": 0,
+        "completed_today": 0,
+        "on_time_rate_today": None,
+        "open_by_stage": {"KIEM_KE": 1, "SOAN_HANG": 1},
+        "overdue_list": [],
+    }
+    html = template.render(
+        dash={"tasks": tasks, "inventory": None, "orders": None, "alerts": [], "errors": {}}
+    )
+    assert "Kiểm kê" in html and "Soạn hàng" in html
+    assert "KIEM_KE" not in html and "SOAN_HANG" not in html
