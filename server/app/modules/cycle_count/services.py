@@ -6,6 +6,7 @@ from decimal import Decimal
 from types import SimpleNamespace as CreateTaskRequest
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from server.app.core.audit import create_audit_log
@@ -24,7 +25,7 @@ from server.app.modules.cycle_count.repositories import CycleCountRepository
 from server.app.modules.cycle_count.schemas import CreateCycleCountRequest, RecordCountRequest
 from server.app.modules.inventory import apply_movement
 from server.app.modules.master_data import get_sku, get_warehouse_config
-from server.app.modules.tasks import create_task
+from server.app.modules.tasks import accept_task, assign_task, complete_task, create_task
 
 VALID_COUNT_TYPES = ("PERIODIC", "RANDOM", "FULL", "SHORTAGE_TRIGGERED", "LOCATION")
 
@@ -162,7 +163,7 @@ class CycleCountService:
             creator_id=user.user_id,
             req=CreateTaskRequest(  # type: ignore[arg-type]
                 zone_id=None,
-                assigned_to=None,
+                assigned_to=user.user_id,
                 note=None,
                 task_type="CYCLE_COUNT",
                 stage="KIEM_KE",
@@ -324,6 +325,53 @@ class CycleCountService:
         else:
             line.anomaly_type = "NONE"
 
+        open_tasks = (
+            db.execute(
+                text(
+                    """
+                SELECT task_id, status::text, assigned_to, version_no
+                FROM tasks
+                WHERE warehouse_id = :wh
+                  AND ref_doc_type = 'CYCLE_COUNT'
+                  AND ref_doc_id = :sid
+                  AND status NOT IN ('COMPLETED', 'CANCELLED')
+                FOR UPDATE;
+                """
+                ),
+                {"wh": warehouse_id, "sid": sheet_id},
+            )
+            .mappings()
+            .all()
+        )
+
+        for t in open_tasks:
+            tid = t["task_id"]
+            tstatus = t["status"]
+            tver = t["version_no"]
+            if tstatus == "UNASSIGNED":
+                assigned = assign_task(
+                    db=db,
+                    task_id=tid,
+                    assigner_id=user.user_id,
+                    req=CreateTaskRequest(assigned_to_user_id=user.user_id, version_no=tver),  # type: ignore[arg-type]
+                    warehouse_id=warehouse_id,
+                )
+                tstatus = assigned.status
+                tver = assigned.version_no
+            elif tstatus == "ASSIGNED" and str(t["assigned_to"]) != str(user.user_id):
+                db.execute(
+                    text("UPDATE tasks SET assigned_to = :uid WHERE task_id = :tid;"),
+                    {"uid": user.user_id, "tid": tid},
+                )
+            if tstatus == "ASSIGNED":
+                accept_task(
+                    db=db,
+                    task_id=tid,
+                    worker_id=user.user_id,
+                    req=CreateTaskRequest(version_no=tver),  # type: ignore[arg-type]
+                    warehouse_id=warehouse_id,
+                )
+
         if sheet.status == "OPEN":
             sheet.status = "COUNTING"
             sheet.version_no += 1
@@ -406,6 +454,59 @@ class CycleCountService:
                     )
                 elif ln.status == "PENDING":
                     ln.status = "REJECTED"
+
+            open_tasks = (
+                db.execute(
+                    text(
+                        """
+                    SELECT task_id, status::text, assigned_to, version_no
+                    FROM tasks
+                    WHERE warehouse_id = :wh
+                      AND ref_doc_type = 'CYCLE_COUNT'
+                      AND ref_doc_id = :sid
+                      AND status NOT IN ('COMPLETED', 'CANCELLED')
+                    FOR UPDATE;
+                    """
+                    ),
+                    {"wh": warehouse_id, "sid": sheet_id},
+                )
+                .mappings()
+                .all()
+            )
+
+            for t in open_tasks:
+                tid = t["task_id"]
+                tstatus = t["status"]
+                tver = t["version_no"]
+                assignee = t["assigned_to"] or user.user_id
+                if tstatus == "UNASSIGNED":
+                    assigned = assign_task(
+                        db=db,
+                        task_id=tid,
+                        assigner_id=user.user_id,
+                        req=CreateTaskRequest(assigned_to_user_id=assignee, version_no=tver),  # type: ignore[arg-type]
+                        warehouse_id=warehouse_id,
+                    )
+                    tstatus = assigned.status
+                    tver = assigned.version_no
+                if tstatus == "ASSIGNED":
+                    accepted = accept_task(
+                        db=db,
+                        task_id=tid,
+                        worker_id=assignee,
+                        req=CreateTaskRequest(version_no=tver),  # type: ignore[arg-type]
+                        warehouse_id=warehouse_id,
+                    )
+                    tstatus = accepted.status
+                    tver = accepted.version_no
+                if tstatus == "IN_PROGRESS":
+                    complete_task(
+                        db=db,
+                        task_id=tid,
+                        worker_id=assignee,
+                        req=CreateTaskRequest(version_no=tver, completed_qty=Decimal("1.000")),  # type: ignore[arg-type]
+                        warehouse_id=warehouse_id,
+                    )
 
             CycleCountRepository.unlock_sheet_locations(db, sheet_id)
             sheet.status = "CLOSED"
