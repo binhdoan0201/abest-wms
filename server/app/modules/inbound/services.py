@@ -402,7 +402,7 @@ class InboundService:
         if grn is None:
             raise BusinessError(code="NOT_FOUND", message="Không tìm thấy GRN", http_status=404)
         enforce_warehouse_scope(user, grn.warehouse_id)
-        can_recount_view = grn.status.startswith("PENDING_D")
+        can_recount_view = grn.status.startswith("PENDING_D") or grn.recount_count > 0
         if (
             user.role_code == HIDE_QTY_ROLE
             and grn.received_by != user.user_id
@@ -433,7 +433,7 @@ class InboundService:
         if grn is None:
             raise BusinessError(code="NOT_FOUND", message="Không tìm thấy GRN", http_status=404)
         enforce_warehouse_scope(user, grn.warehouse_id)
-        can_recount_view = grn.status.startswith("PENDING_D")
+        can_recount_view = grn.status.startswith("PENDING_D") or grn.recount_count > 0
         if (
             user.role_code == HIDE_QTY_ROLE
             and grn.received_by != user.user_id
@@ -831,7 +831,7 @@ class InboundService:
         if grn is None:
             raise BusinessError(code="NOT_FOUND", message="Không tìm thấy GRN", http_status=404)
         enforce_warehouse_scope(user, grn.warehouse_id)
-        can_recount_view = grn.status.startswith("PENDING_D")
+        can_recount_view = grn.status.startswith("PENDING_D") or grn.recount_count > 0
         if (
             user.role_code == HIDE_QTY_ROLE
             and grn.received_by != user.user_id
