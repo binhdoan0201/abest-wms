@@ -214,6 +214,7 @@ class OutboundService:
                 "package_id": str(p["package_id"]),
                 "package_barcode": p["package_barcode"],
                 "gi_id": str(p["gi_id"]) if p["gi_id"] else None,
+                "gi_number": p.get("gi_number"),
                 "box_type_id": str(p["box_type_id"]) if p["box_type_id"] else None,
                 "weight_kg": _fmt_num(p["weight_kg"]),
                 "is_loaded_on_truck": bool(p["is_loaded_on_truck"]),

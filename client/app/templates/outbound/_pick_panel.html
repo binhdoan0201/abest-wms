@@ -2,14 +2,19 @@
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
     <h2 class="text-lg font-semibold text-slate-800">Khu vực Soạn hàng (NV Soạn)</h2>
     <form method="get" action="{{ pick_action_url or '/outbound' }}" class="flex items-center gap-2">
-      <input type="text" name="session_id" value="{{ session_id }}" placeholder="Nhập UUID phiên soạn..." class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm w-72" />
+      <select name="session_id" aria-label="Phiên soạn hàng" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm bg-white min-w-[220px]">
+        <option value="">-- Chọn phiên soạn hàng --</option>
+        {% for ps_opt in pick_sessions or [] %}
+          <option value="{{ ps_opt.id }}" {% if session_id == ps_opt.id %}selected{% endif %}>{{ ps_opt.label }}</option>
+        {% endfor %}
+      </select>
       <button type="submit" class="rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900">Tải phiên soạn</button>
     </form>
   </div>
   {% if flash_msg %}<div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{{ flash_msg }}</div>{% endif %}
   {% if api_error %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>[{{ api_error.code }}]</strong> {{ api_error.message }}</div>{% endif %}
   {% if pick_session %}
-  <div class="text-sm text-slate-600">Phiên: <strong>{{ pick_session.pick_session_id }}</strong> | Trạng thái: <strong>{{ pick_session.status }}</strong> | v{{ pick_session.version_no }}</div>
+  <div class="text-sm text-slate-600">Phiên: <strong>{{ pick_session.display_label or pick_session.pick_session_code or pick_session.session_code }}</strong> | Trạng thái: <strong>{{ pick_session.status }}</strong> | v{{ pick_session.version_no }}</div>
   <div class="overflow-x-auto">
     <table class="min-w-full divide-y divide-slate-200 text-sm">
       <thead class="bg-slate-50 text-left font-semibold text-slate-600">
@@ -18,7 +23,7 @@
       <tbody class="divide-y divide-slate-100">
         {% for l in pick_session.lines %}
         <tr>
-          <td class="px-3 py-2 font-mono text-xs">{{ l.pick_line_id }}</td>
+          <td class="px-3 py-2 font-mono text-xs">{{ l.sku_code or l.line_no or loop.index }}</td>
           <td class="px-3 py-2">{{ l.qty_to_pick }}</td>
           <td class="px-3 py-2">{{ l.status }}</td>
           <td class="px-3 py-2">
