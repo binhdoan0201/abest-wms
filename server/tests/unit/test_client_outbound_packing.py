@@ -353,3 +353,336 @@ def test_pack_and_ship_route_confirm_gi_waybill_error_keeps_selected_gi(
     assert resp.status_code == 200
     assert "OUTBOUND_WAYBILL_REQUIRED" in resp.text
     assert '<option value="gi-1" selected>' in resp.text
+
+
+def test_thukho_creates_session_for_nv_soan_visible_in_picking(
+    web: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created_sessions: list[dict[str, Any]] = []
+    assigned_tasks: list[dict[str, Any]] = []
+    current_role: dict[str, Any] = {
+        "username": "thukho",
+        "role_code": "thukho",
+        "permissions": ["SO-1", "XK-1"],
+    }
+
+    def fake_get(
+        self: ApiClient, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/auth/me":
+            return {"data": dict(current_role)}
+        if path == "/users":
+            return {
+                "data": [
+                    {
+                        "user_id": "u-nv-soan",
+                        "username": "nv_soan",
+                        "full_name": "NV Soạn",
+                        "role_code": "nv_soan",
+                        "can_receive_tasks": True,
+                    }
+                ]
+            }
+        if path == "/outbound-orders":
+            return {
+                "data": [
+                    {
+                        "order_id": "ord-100",
+                        "erp_order_number": "DEMO-SO-001",
+                        "order_type": "SALES",
+                        "customer_name": "Khách lẻ",
+                        "status": "NEW",
+                        "version_no": 1,
+                    }
+                ]
+            }
+        if path == "/tasks":
+            return {"data": list(assigned_tasks)}
+        if path.startswith("/pick-sessions/"):
+            sid = path.rsplit("/", 1)[-1]
+            for s in created_sessions:
+                if s["pick_session_id"] == sid:
+                    return {"data": s}
+        return {"data": []}
+
+    def fake_post(
+        self: ApiClient, path: str, json_data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/auth/login":
+            return {
+                "data": {
+                    "access_token": "tok-demo-123",
+                    "refresh_token": "ref-demo-123",
+                    "user": dict(current_role),
+                }
+            }
+        if path == "/pick-sessions":
+            picker_id = str((json_data or {}).get("picker_user_id") or "")
+            sid = "ps-demo-001"
+            session_obj = {
+                "pick_session_id": sid,
+                "status": "IN_PROGRESS",
+                "version_no": 1,
+                "picker_user_id": picker_id,
+                "lines": [
+                    {"erp_order_number": "DEMO-SO-001", "qty_to_pick": 3, "status": "PENDING"}
+                ],
+            }
+            created_sessions.append(session_obj)
+            if picker_id:
+                assigned_tasks.append(
+                    {
+                        "task_type": "PICKING",
+                        "ref_doc_type": "PICK_SESSION",
+                        "ref_doc_id": sid,
+                        "assigned_to": picker_id,
+                        "status": "IN_PROGRESS",
+                    }
+                )
+            return {"data": session_obj}
+        return {"data": {}}
+
+    monkeypatch.setattr(ApiClient, "get", fake_get)
+    monkeypatch.setattr(ApiClient, "post", fake_post)
+
+    cookies = _login(web, "thukho")
+    create_resp = web.post(
+        "/outbound/pick-sessions/create",
+        data={"order_id": "ord-100", "pick_mode": "SINGLE_ORDER", "picker_user_id": "u-nv-soan"},
+        cookies=cookies,
+    )
+    assert create_resp.status_code == 200
+    assert "u-nv-soan" in create_resp.text
+    assert created_sessions[-1]["picker_user_id"] == "u-nv-soan"
+
+    current_role.update(
+        {
+            "user_id": "u-nv-soan",
+            "username": "nv_soan",
+            "role_code": "nv_soan",
+            "permissions": ["SO-1"],
+        }
+    )
+    pick_resp = web.get("/outbound/picking", cookies=cookies)
+    assert pick_resp.status_code == 200
+    assert 'value="ps-demo-001"' in pick_resp.text
+    assert "Soạn đơn DEMO-SO-001" in pick_resp.text
+
+
+def test_allocate_then_create_session_for_nv_soan_visible_in_picking(
+    web: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allocated_orders: set[str] = set()
+    created_sessions: list[dict[str, Any]] = []
+    assigned_tasks: list[dict[str, Any]] = []
+    current_role: dict[str, Any] = {
+        "username": "thukho",
+        "role_code": "thukho",
+        "permissions": ["SO-1", "XK-1"],
+    }
+
+    def fake_get(
+        self: ApiClient, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/auth/me":
+            return {"data": dict(current_role)}
+        if path == "/users":
+            return {
+                "data": [
+                    {
+                        "user_id": "u-nv-soan",
+                        "username": "nv_soan",
+                        "full_name": "NV Soạn",
+                        "role_code": "nv_soan",
+                        "can_receive_tasks": True,
+                        "is_active": True,
+                    }
+                ]
+            }
+        if path == "/outbound-orders":
+            return {
+                "data": [
+                    {
+                        "order_id": "ord-100",
+                        "erp_order_number": "DEMO-SO-001",
+                        "order_type": "SALES",
+                        "customer_name": "Khách lẻ",
+                        "status": "NEW",
+                        "erp_change_pending": False,
+                        "version_no": 2 if "ord-100" in allocated_orders else 1,
+                    }
+                ]
+            }
+        if path == "/tasks":
+            return {"data": list(assigned_tasks)}
+        if path.startswith("/pick-sessions/"):
+            sid = path.rsplit("/", 1)[-1]
+            for s in created_sessions:
+                if s["pick_session_id"] == sid:
+                    return {"data": s}
+        return {"data": []}
+
+    def fake_post(
+        self: ApiClient, path: str, json_data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/auth/login":
+            return {
+                "data": {
+                    "access_token": "tok-demo-123",
+                    "refresh_token": "ref-demo-123",
+                    "user": dict(current_role),
+                }
+            }
+        if path == "/outbound-orders/ord-100/allocate":
+            allocated_orders.add("ord-100")
+            return {"data": {"order_id": "ord-100", "status": "NEW", "version_no": 2}}
+        if path == "/pick-sessions":
+            picker_id = str((json_data or {}).get("picker_user_id") or "")
+            sid = "ps-demo-001"
+            session_obj = {
+                "pick_session_id": sid,
+                "status": "IN_PROGRESS",
+                "version_no": 1,
+                "picker_user_id": picker_id,
+                "lines": [
+                    {
+                        "erp_order_number": "DEMO-SO-001",
+                        "qty_to_pick": 3,
+                        "status": "PENDING",
+                    }
+                ],
+            }
+            created_sessions.append(session_obj)
+            if picker_id:
+                assigned_tasks.append(
+                    {
+                        "task_type": "PICKING",
+                        "ref_doc_type": "PICK_SESSION",
+                        "ref_doc_id": sid,
+                        "assigned_to": picker_id,
+                        "status": "IN_PROGRESS",
+                    }
+                )
+            return {"data": session_obj}
+        return {"data": {}}
+
+    monkeypatch.setattr(ApiClient, "get", fake_get)
+    monkeypatch.setattr(ApiClient, "post", fake_post)
+
+    cookies = _login(web, "thukho")
+    alloc_resp = web.post(
+        "/outbound/orders/ord-100/allocate",
+        data={"strategy": "FEFO", "version_no": "1"},
+        cookies=cookies,
+    )
+    assert alloc_resp.status_code == 200
+    assert '<option value="u-nv-soan"' in alloc_resp.text
+
+    create_resp = web.post(
+        "/outbound/pick-sessions/create",
+        data={
+            "order_id": "ord-100",
+            "pick_mode": "SINGLE_ORDER",
+            "picker_user_id": "u-nv-soan",
+        },
+        cookies=cookies,
+    )
+    assert create_resp.status_code == 200
+    assert "Đã tạo phiên soạn Soạn đơn DEMO-SO-001!" in create_resp.text
+    assert created_sessions[-1]["picker_user_id"] == "u-nv-soan"
+
+    current_role.update(
+        {
+            "user_id": "u-nv-soan",
+            "username": "nv_soan",
+            "role_code": "nv_soan",
+            "permissions": ["SO-1"],
+        }
+    )
+    pick_resp = web.get("/outbound/picking", cookies=cookies)
+    assert pick_resp.status_code == 200
+    assert 'value="ps-demo-001"' in pick_resp.text
+    assert "Soạn đơn DEMO-SO-001" in pick_resp.text
+
+
+def test_create_pick_session_without_picker_is_blocked(
+    web: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    posted_paths: list[str] = []
+
+    def fake_get(
+        self: ApiClient, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/auth/me":
+            return {
+                "data": {
+                    "username": "thukho",
+                    "role_code": "thukho",
+                    "permissions": ["SO-1", "XK-1"],
+                }
+            }
+        if path == "/users":
+            return {
+                "data": [
+                    {
+                        "user_id": "u-nv-soan-1",
+                        "username": "nv_soan_1",
+                        "full_name": "NV Soạn 1",
+                        "role_code": "nv_soan",
+                        "can_receive_tasks": True,
+                        "is_active": True,
+                    },
+                    {
+                        "user_id": "u-nv-soan-2",
+                        "username": "nv_soan_2",
+                        "full_name": "NV Soạn 2",
+                        "role_code": "nv_soan",
+                        "can_receive_tasks": True,
+                        "is_active": True,
+                    },
+                ]
+            }
+        if path == "/outbound-orders":
+            return {
+                "data": [
+                    {
+                        "order_id": "ord-100",
+                        "erp_order_number": "DEMO-SO-001",
+                        "order_type": "SALES",
+                        "customer_name": "Khách lẻ",
+                        "status": "NEW",
+                        "erp_change_pending": False,
+                        "version_no": 1,
+                    }
+                ]
+            }
+        return {"data": []}
+
+    def fake_post(
+        self: ApiClient, path: str, json_data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/auth/login":
+            return {
+                "data": {
+                    "access_token": "tok-demo-123",
+                    "refresh_token": "ref-demo-123",
+                    "user": {"username": "thukho", "role_code": "thukho"},
+                }
+            }
+        posted_paths.append(path)
+        return {"data": {}}
+
+    monkeypatch.setattr(ApiClient, "get", fake_get)
+    monkeypatch.setattr(ApiClient, "post", fake_post)
+
+    cookies = _login(web, "thukho")
+    resp = web.post(
+        "/outbound/pick-sessions/create",
+        data={"order_id": "ord-100", "pick_mode": "SINGLE_ORDER", "picker_user_id": ""},
+        cookies=cookies,
+    )
+    assert resp.status_code == 200
+    assert "/pick-sessions" not in posted_paths
+    assert "PICKER_REQUIRED" in resp.text
+    assert '<option value="u-nv-soan-1"' in resp.text
+    assert '<option value="u-nv-soan-2"' in resp.text

@@ -93,6 +93,88 @@ def _enrich_pick_session(session_data: Any, fallback_id: str = "") -> Any:
     return enriched
 
 
+def _load_pick_session_pickers(api: ApiClient) -> list[dict[str, str]]:
+    pickers: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for params in ({"page_size": 100, "limit": 100}, None):
+        try:
+            raw = (
+                api.get("/users", params=params).get("data", [])
+                if params
+                else api.get("/users").get("data", [])
+            )
+        except ClientApiError:
+            continue
+        rows = raw.get("items", []) if isinstance(raw, dict) else raw
+        if not isinstance(rows, list) or not rows:
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if "can_receive_tasks" in row and row.get("can_receive_tasks") is False:
+                continue
+            if "is_active" in row and row.get("is_active") is False:
+                continue
+            role_tokens: list[str] = []
+            for k in ("role_code", "role", "role_name"):
+                v = str(row.get(k) or "").strip().lower().replace("_", "-")
+                if v:
+                    role_tokens.append(v)
+            roles_val = row.get("roles")
+            if isinstance(roles_val, list):
+                for r in roles_val:
+                    if isinstance(r, dict):
+                        rv = (
+                            str(r.get("code") or r.get("role_code") or r.get("name") or "")
+                            .strip()
+                            .lower()
+                            .replace("_", "-")
+                        )
+                    else:
+                        rv = str(r or "").strip().lower().replace("_", "-")
+                    if rv:
+                        role_tokens.append(rv)
+            if not any(t in {"nv-soan", "nv-soanhang", "picker"} for t in role_tokens):
+                continue
+            uid = str(row.get("user_id") or row.get("id") or row.get("sub") or "").strip()
+            if not uid or uid in seen:
+                continue
+            full_name = str(row.get("full_name") or row.get("name") or "").strip()
+            username = str(row.get("username") or "").strip()
+            label = (
+                f"{full_name} ({username})"
+                if full_name and username
+                else (full_name or username or uid[:8])
+            )
+            seen.add(uid)
+            pickers.append({"id": uid, "label": label})
+        if pickers:
+            break
+    return pickers
+
+
+def _build_orders_table_context(
+    request: Request,
+    api: ApiClient,
+    user: dict[str, Any],
+    *,
+    flash_msg: str | None = None,
+    api_error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        orders = api.get("/outbound-orders").get("data", [])
+    except ClientApiError:
+        orders = []
+    return {
+        "request": request,
+        "perms": _extract_perms(user),
+        "orders": orders,
+        "pickers": _load_pick_session_pickers(api),
+        "flash_msg": flash_msg,
+        "api_error": api_error,
+    }
+
+
 def _load_pick_session_options(
     api: ApiClient,
     user: dict[str, Any],
@@ -215,6 +297,7 @@ def outbound_page(
             "role_code": user.get("role_code", ""),
             "perms": perms,
             "orders": orders,
+            "pickers": _load_pick_session_pickers(api),
             "selected_status": status or "",
             "pick_session": pick_session,
             "pick_sessions": pick_sessions,
@@ -468,17 +551,13 @@ def outbound_allocate_htmx(
         flash_msg = "Đã cấp phát tồn kho thành công!"
     except ClientApiError as exc:
         api_error = {"code": exc.code, "message": exc.message}
-    try:
-        orders = api.get("/outbound-orders").get("data", [])
-    except ClientApiError:
-        orders = []
-    ctx = {
-        "request": request,
-        "perms": _extract_perms(user),
-        "orders": orders,
-        "flash_msg": flash_msg,
-        "api_error": api_error,
-    }
+    ctx = _build_orders_table_context(
+        request,
+        api,
+        user,
+        flash_msg=flash_msg,
+        api_error=api_error,
+    )
     return get_templates(request).TemplateResponse(
         request=request, name="outbound/_orders_table.html", context=ctx
     )
@@ -493,10 +572,22 @@ def outbound_create_pick_htmx(
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Response:
     api = ApiClient(token=get_session_token(request))
+    if not picker_user_id.strip():
+        ctx = _build_orders_table_context(
+            request,
+            api,
+            user,
+            api_error={
+                "code": "PICKER_REQUIRED",
+                "message": "Vui lòng chọn người soạn hàng trước khi tạo phiên soạn.",
+            },
+        )
+        return get_templates(request).TemplateResponse(
+            request=request, name="outbound/_orders_table.html", context=ctx
+        )
     flash_msg, api_error = None, None
     payload: dict[str, Any] = {"order_ids": [order_id], "pick_mode": pick_mode}
-    if picker_user_id.strip():
-        payload["picker_user_id"] = picker_user_id.strip()
+    payload["picker_user_id"] = picker_user_id.strip()
     try:
         res = api.post("/pick-sessions", json_data=payload).get("data", {})
         created_sid = str(res.get("pick_session_id") or "").strip()
@@ -512,17 +603,13 @@ def outbound_create_pick_htmx(
         flash_msg = f"Đã tạo phiên soạn {created_label}!"
     except ClientApiError as exc:
         api_error = {"code": exc.code, "message": exc.message}
-    try:
-        orders = api.get("/outbound-orders").get("data", [])
-    except ClientApiError:
-        orders = []
-    ctx = {
-        "request": request,
-        "perms": _extract_perms(user),
-        "orders": orders,
-        "flash_msg": flash_msg,
-        "api_error": api_error,
-    }
+    ctx = _build_orders_table_context(
+        request,
+        api,
+        user,
+        flash_msg=flash_msg,
+        api_error=api_error,
+    )
     return get_templates(request).TemplateResponse(
         request=request, name="outbound/_orders_table.html", context=ctx
     )
