@@ -322,3 +322,73 @@ def test_tasks_access_and_supervisor_dispatch_htmx(
         f"/tasks/{task_id}/priority",
         "/tasks/auto-assign",
     ]
+
+
+def test_resolve_task_open_url_and_worker_no_uuid(
+    web: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from client.app.modules.tasks.views import _resolve_task_open_url
+
+    doc_id = str(uuid.uuid4())
+    assert (
+        _resolve_task_open_url(
+            {"task_type": "PUTAWAY", "ref_doc_type": "GRN", "ref_doc_id": doc_id}
+        )
+        == f"/inbound?grn_id={doc_id}"
+    )
+    assert (
+        _resolve_task_open_url(
+            {"task_type": "PUTAWAY", "ref_doc_type": "PALLET", "ref_doc_id": doc_id}
+        )
+        == f"/inbound?pallet_id={doc_id}"
+    )
+    assert (
+        _resolve_task_open_url(
+            {"task_type": "PICKING", "ref_doc_type": "PICK_SESSION", "ref_doc_id": doc_id}
+        )
+        == f"/outbound?session_id={doc_id}"
+    )
+    assert (
+        _resolve_task_open_url({"task_type": "PACKING", "ref_doc_type": "SO", "ref_doc_id": doc_id})
+        == "/outbound/packing"
+    )
+    assert (
+        _resolve_task_open_url(
+            {"task_type": "CYCLE_COUNT", "ref_doc_type": "CYCLE_COUNT", "ref_doc_id": doc_id}
+        )
+        == f"/cycle-count?sheet_id={doc_id}"
+    )
+
+    nv_cookie = _login(web, "nv_cat")
+    worker_uuid = "c0000000-0000-0000-0000-000000000004"
+    orig_get = ApiClient.get
+
+    def fake_get(
+        self: ApiClient, path: str, params: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        if path.startswith("/auth"):
+            res = orig_get(self, path, params=params)
+            if isinstance(res.get("data"), dict):
+                res["data"]["user_id"] = worker_uuid
+            return res
+        return {
+            "data": [
+                {
+                    "task_id": str(uuid.uuid4()),
+                    "task_type": "PUTAWAY",
+                    "stage": "CAT_HANG",
+                    "ref_doc_type": "GRN",
+                    "ref_doc_id": doc_id,
+                    "priority": "HIGH",
+                    "status": "ASSIGNED",
+                    "assigned_to": worker_uuid,
+                    "version_no": 1,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(ApiClient, "get", fake_get)
+    resp = web.get("/tasks", cookies={"abest_session": nv_cookie})
+    assert resp.status_code == 200
+    assert worker_uuid not in resp.text
+    assert f"/inbound?grn_id={doc_id}" in resp.text

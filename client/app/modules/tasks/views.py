@@ -61,27 +61,32 @@ def _load_workers(api: ApiClient) -> list[dict[str, Any]]:
 
 
 def _resolve_task_open_url(task: dict[str, Any]) -> str | None:
-    """Tạo đường dẫn mở trực tiếp chứng từ nghiệp vụ tương ứng với từng loại task."""
+    """T?o ???ng d?n m? tr?c ti?p ch?ng t? nghi?p v? t??ng ?ng v?i t?ng lo?i task."""
     task_type = str(task.get("task_type") or "").upper()
     doc_type = str(task.get("ref_doc_type") or "").upper()
     doc_id = str(task.get("ref_doc_id") or "").strip()
     if not doc_id:
         return None
-
     encoded_id = quote(doc_id, safe="")
-    if task_type == "PUTAWAY" or doc_type == "PALLET":
+    if doc_type == "PALLET":
         return f"/inbound?pallet_id={encoded_id}"
-    if task_type == "RECEIVING" or doc_type == "GRN":
+    if doc_type == "GRN":
         return f"/inbound?grn_id={encoded_id}"
-    if task_type == "PICKING" or doc_type in {"PICK_SESSION", "PICKING_SESSION"}:
+    if doc_type in {"PICK_SESSION", "PICKING_SESSION"}:
         return f"/outbound?session_id={encoded_id}"
-    if task_type == "PACKING" or doc_type in {"SO", "SALES_ORDER", "GI"}:
-        return "/outbound"
-    if task_type in {"CYCLE_COUNT", "RECOUNT"} or doc_type in {
-        "CYCLE_COUNT",
-        "COUNT_SHEET",
-        "CYCLE_COUNT_SHEET",
-    }:
+    if doc_type in {"CYCLE_COUNT", "COUNT_SHEET", "CYCLE_COUNT_SHEET"}:
+        return f"/cycle-count?sheet_id={encoded_id}"
+    if doc_type in {"SO", "SALES_ORDER", "GI"}:
+        return "/outbound/packing"
+    if task_type == "PUTAWAY":
+        return f"/inbound?pallet_id={encoded_id}"
+    if task_type == "RECEIVING":
+        return f"/inbound?grn_id={encoded_id}"
+    if task_type == "PICKING":
+        return f"/outbound?session_id={encoded_id}"
+    if task_type == "PACKING":
+        return "/outbound/packing"
+    if task_type in {"CYCLE_COUNT", "RECOUNT"}:
         return f"/cycle-count?sheet_id={encoded_id}"
     return None
 

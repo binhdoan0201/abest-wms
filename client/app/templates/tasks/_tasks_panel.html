@@ -57,13 +57,16 @@
             </td>
             <td class="px-3 py-3 text-xs text-slate-700">
               {% if t.assigned_to %}
-                {% set ns = namespace(label=t.assigned_to) %}
+                {% set ns = namespace(label='') %}
                 {% for w in workers %}
                   {% if w.user_id == t.assigned_to %}
                     {% set ns.label = (w.full_name ~ ' (' ~ w.username ~ ')') if w.full_name else w.username %}
                   {% endif %}
                 {% endfor %}
-                <span class="font-medium">{{ ns.label }}</span>
+                {% if not ns.label and user and t.assigned_to == user.user_id %}
+                  {% set ns.label = user.full_name or user.username or 'B?n' %}
+                {% endif %}
+                <span class="font-medium">{{ ns.label or '?? giao' }}</span>
               {% else %}
                 <span class="text-slate-400">Chưa giao</span>
               {% endif %}
