@@ -4,7 +4,7 @@
   {% if api_error %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>[{{ api_error.code }}]</strong> {{ api_error.message }}</div>{% endif %}
   {% if gi_info %}
     <div class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 space-y-1">
-      <div><strong>Phiếu GI:</strong> {{ gi_info.gi_number }} ({{ gi_info.gi_id }}) — Trạng thái đơn: <strong>{{ gi_info.order_status }}</strong></div>
+      <div><strong>Phiếu GI:</strong> {{ gi_info.gi_number }} — Trạng thái đơn: <strong>{{ gi_info.order_status }}</strong></div>
       <div><strong>Mã vận đơn TMS:</strong> {{ gi_info.waybill_text }}</div>
     </div>
   {% endif %}
@@ -47,8 +47,15 @@
     </form>
     <form hx-post="/outbound/pack-and-ship" hx-target="#outbound-pack-container" hx-swap="innerHTML" class="rounded-lg border border-slate-200 p-3 space-y-2">
       <input type="hidden" name="action" value="confirm_gi" />
+      <input type="hidden" name="order_id" value="{{ selected_order_id or '' }}" class="pack-step-order-input" />
       <div class="font-medium text-sm text-slate-700">3. Xác nhận giao hàng (SHIPPED)</div>
-      <input type="text" name="gi_id" value="{{ gi_info.gi_id if gi_info else '' }}" placeholder="UUID Phiếu GI" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs" />
+      {% set active_gi = selected_gi_id or (gi_info.gi_id if gi_info else '') %}
+      <select id="pack-gi-select" name="gi_id" aria-label="Phiếu xuất kho GI" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">-- Chọn phiếu GI --</option>
+        {% for g in gi_options or [] %}
+          <option value="{{ g.id }}" {% if active_gi == g.id %}selected{% endif %}>{{ g.label }}</option>
+        {% endfor %}
+      </select>
       <input type="text" name="driver_signature_data" placeholder="Tài xế ký (nhập họ tên)" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs" />
       <button type="submit" class="w-full rounded bg-emerald-600 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Xác nhận xuất kho</button>
     </form>
@@ -59,6 +66,28 @@
   const c = document.getElementById("pack-ship-forms");
   if (!c) return;
   const sels = Array.from(c.querySelectorAll("select.pack-step-order"));
-  sels.forEach((s) => s.addEventListener("change", () => sels.forEach((o) => { if (o !== s) o.value = s.value; })));
+  const hiddens = Array.from(c.querySelectorAll("input.pack-step-order-input"));
+  const giSel = document.getElementById("pack-gi-select");
+  const reloadGi = (orderId) => {
+    if (!giSel) return;
+    const curGi = encodeURIComponent(giSel.value || "");
+    const oid = encodeURIComponent(orderId || "");
+    if (window.htmx) {
+      window.htmx.ajax("GET", `/outbound/pack-and-ship/gi-options?order_id=${oid}&gi_id=${curGi}`, {
+        target: "#pack-gi-select",
+        swap: "innerHTML",
+      });
+    } else {
+      fetch(`/outbound/pack-and-ship/gi-options?order_id=${oid}&gi_id=${curGi}`)
+        .then((r) => r.text())
+        .then((html) => { giSel.innerHTML = html; })
+        .catch(() => {});
+    }
+  };
+  sels.forEach((s) => s.addEventListener("change", () => {
+    sels.forEach((o) => { if (o !== s) o.value = s.value; });
+    hiddens.forEach((h) => { h.value = s.value; });
+    reloadGi(s.value);
+  }));
 })();
 </script>
