@@ -1,6 +1,7 @@
 """Web Controller cho phân hệ Điều phối & Thực thi Nhiệm vụ (Tasks) — Task D-08 & D-02."""
 
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse
@@ -50,12 +51,45 @@ def _load_workers(api: ApiClient) -> list[dict[str, Any]]:
             return [
                 u
                 for u in data
-                if str(u.get("role_code", "")).startswith("nv-")
-                and u.get("can_receive_tasks", u.get("is_active", True))
+                if u.get("is_active", True)
+                and u.get("can_receive_tasks") is True
+                and u.get("role_code") not in BLOCKED_ROLES
             ]
     except ClientApiError:
         pass
     return []
+
+
+def _resolve_task_open_url(task: dict[str, Any]) -> str | None:
+    """Tạo đường dẫn mở trực tiếp chứng từ nghiệp vụ tương ứng với từng loại task."""
+    task_type = str(task.get("task_type") or "").upper()
+    doc_type = str(task.get("ref_doc_type") or "").upper()
+    doc_id = str(task.get("ref_doc_id") or "").strip()
+    if not doc_id:
+        return None
+
+    encoded_id = quote(doc_id, safe="")
+    if task_type == "PUTAWAY" or doc_type == "PALLET":
+        return f"/inbound?pallet_id={encoded_id}"
+    if task_type == "RECEIVING" or doc_type == "GRN":
+        return f"/inbound?grn_id={encoded_id}"
+    if task_type == "PICKING" or doc_type in {"PICK_SESSION", "PICKING_SESSION"}:
+        return f"/outbound?session_id={encoded_id}"
+    if task_type == "PACKING" or doc_type in {"SO", "SALES_ORDER", "GI"}:
+        return "/outbound"
+    if task_type in {"CYCLE_COUNT", "RECOUNT"} or doc_type in {
+        "CYCLE_COUNT",
+        "COUNT_SHEET",
+        "CYCLE_COUNT_SHEET",
+    }:
+        return f"/cycle-count?sheet_id={encoded_id}"
+    return None
+
+
+def _enrich_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for t in tasks:
+        t["open_url"] = _resolve_task_open_url(t)
+    return tasks
 
 
 def _fetch_tasks(
@@ -73,7 +107,7 @@ def _fetch_tasks(
             tasks = []
         if priority:
             tasks = [t for t in tasks if t.get("priority") == priority]
-        return tasks, None
+        return _enrich_tasks(tasks), None
     except ClientApiError as exc:
         if exc.http_status == 403:
             raise

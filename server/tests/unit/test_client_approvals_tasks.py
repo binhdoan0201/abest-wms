@@ -192,7 +192,8 @@ def test_tasks_access_and_supervisor_dispatch_htmx(
     resp_page = web.get("/tasks", cookies={"abest_session": thukho_cookie})
     assert resp_page.status_code == 200
     assert "Điều phối &amp; Quản lý Nhiệm vụ Kho" in resp_page.text
-    assert "Tạo nhiệm vụ thủ công" in resp_page.text
+    assert "Phân công tự động hàng đợi" in resp_page.text
+    assert "Tạo nhiệm vụ thủ công" not in resp_page.text
 
     bgd_cookie = _login(web, "bgd")
     resp_bgd = web.get("/tasks", cookies={"abest_session": bgd_cookie})

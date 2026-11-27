@@ -34,55 +34,22 @@
   </div>
 
   {% if is_supervisor %}
-  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-3">
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-      <h2 class="text-sm font-bold text-slate-800">+ Tạo nhiệm vụ thủ công &amp; Giao tự động</h2>
-      <form hx-post="/tasks/auto-assign" hx-target="#tasks-board-panel" hx-swap="innerHTML" class="flex flex-wrap items-center gap-2">
-        <select name="stage" class="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
-          <option value="">Tự động giao: Tất cả khâu</option>
-          <option value="NHAN_HANG">Khâu: NHAN_HANG</option>
-          <option value="CAT_HANG">Khâu: CAT_HANG</option>
-          <option value="SOAN_HANG">Khâu: SOAN_HANG</option>
-          <option value="DONG_GOI_XUAT">Khâu: DONG_GOI_XUAT</option>
-          <option value="KIEM_KE">Khâu: KIEM_KE</option>
-        </select>
-        <button type="submit" class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
-          ⚡ Tự động giao hàng đợi
-        </button>
-      </form>
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div>
+      <h2 class="text-sm font-bold text-slate-800">Phân công tự động hàng đợi</h2>
+      <p class="text-xs text-slate-500">Tự động giao các nhiệm vụ chưa có người nhận cho nhân viên cùng khâu đang ít việc nhất</p>
     </div>
-    <form hx-post="/tasks/create" hx-target="#tasks-board-panel" hx-swap="innerHTML" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3 items-center">
-      <select name="task_type" required class="rounded-lg border border-slate-300 px-3 py-2 text-xs bg-white">
-        <option value="RECEIVING">RECEIVING (Nhận hàng)</option>
-        <option value="PUTAWAY">PUTAWAY (Cất hàng)</option>
-        <option value="PICKING">PICKING (Soạn hàng)</option>
-        <option value="PACKING">PACKING (Đóng gói)</option>
-        <option value="CYCLE_COUNT">CYCLE_COUNT (Kiểm kê)</option>
-        <option value="RECOUNT">RECOUNT (Đếm lại)</option>
-        <option value="INTERNAL_MOVE">INTERNAL_MOVE (Di chuyển nội bộ)</option>
-        <option value="SCRAP_EXECUTION">SCRAP_EXECUTION (Hủy hàng)</option>
+    <form hx-post="/tasks/auto-assign" hx-target="#tasks-board-panel" hx-swap="innerHTML" class="flex flex-wrap items-center gap-2">
+      <select name="stage" class="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">Tự động giao: Tất cả khâu</option>
+        <option value="NHAN_HANG">Khâu: NHAN_HANG</option>
+        <option value="CAT_HANG">Khâu: CAT_HANG</option>
+        <option value="SOAN_HANG">Khâu: SOAN_HANG</option>
+        <option value="DONG_GOI_XUAT">Khâu: DONG_GOI_XUAT</option>
+        <option value="KIEM_KE">Khâu: KIEM_KE</option>
       </select>
-      <select name="stage" required class="rounded-lg border border-slate-300 px-3 py-2 text-xs bg-white">
-        <option value="NHAN_HANG">NHAN_HANG</option>
-        <option value="CAT_HANG">CAT_HANG</option>
-        <option value="SOAN_HANG">SOAN_HANG</option>
-        <option value="DONG_GOI_XUAT">DONG_GOI_XUAT</option>
-        <option value="KIEM_KE">KIEM_KE</option>
-        <option value="QUAN_LY_CHUNG">QUAN_LY_CHUNG</option>
-      </select>
-      <input type="text" name="ref_doc_type" placeholder="Loại CT (PO, SO, GRN...)" required class="rounded-lg border border-slate-300 px-3 py-2 text-xs">
-      <input type="text" name="ref_doc_id" placeholder="UUID chứng từ tham chiếu" required class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-mono">
-      <select name="priority" class="rounded-lg border border-slate-300 px-3 py-2 text-xs bg-white font-semibold">
-        <option value="NORMAL">Ưu tiên: NORMAL</option>
-        <option value="HIGH">Ưu tiên: HIGH</option>
-        <option value="URGENT">Ưu tiên: URGENT</option>
-      </select>
-      <label class="inline-flex items-center gap-1.5 text-xs text-slate-700 font-medium px-1">
-        <input type="checkbox" name="auto_assign" value="1" class="rounded border-slate-300 text-indigo-600">
-        Tự giao ngay
-      </label>
-      <button type="submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700">
-        Tạo nhiệm vụ
+      <button type="submit" class="rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+        ⚡ Tự động giao hàng đợi
       </button>
     </form>
   </div>
