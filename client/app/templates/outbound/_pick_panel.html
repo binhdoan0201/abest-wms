@@ -1,0 +1,67 @@
+<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <h2 class="text-lg font-semibold text-slate-800">Khu vực Soạn hàng (NV Soạn)</h2>
+    <form method="get" action="{{ pick_action_url or '/outbound' }}" class="flex items-center gap-2">
+      <select name="session_id" aria-label="Phiên soạn hàng" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm bg-white min-w-[220px]">
+        <option value="">-- Chọn phiên soạn hàng --</option>
+        {% for ps_opt in pick_sessions or [] %}
+          <option value="{{ ps_opt.id }}" {% if session_id == ps_opt.id %}selected{% endif %}>{{ ps_opt.label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900">Tải phiên soạn</button>
+    </form>
+  </div>
+  {% if flash_msg %}<div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{{ flash_msg }}</div>{% endif %}
+  {% if api_error %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>[{{ api_error.code }}]</strong> {{ api_error.message }}</div>{% endif %}
+  {% if pick_session %}
+  <div class="text-sm text-slate-600">Phiên: <strong>{{ pick_session.display_label or pick_session.pick_session_code or pick_session.session_code }}</strong> | Trạng thái: <strong>{{ pick_session.status }}</strong> | v{{ pick_session.version_no }}</div>
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+      <thead class="bg-slate-50 text-left font-semibold text-slate-600">
+        <tr><th class="px-3 py-2">Dòng soạn</th><th class="px-3 py-2">SL cần lấy</th><th class="px-3 py-2">Trạng thái</th><th class="px-3 py-2">Xác nhận lấy đủ</th><th class="px-3 py-2">Báo ngoại lệ</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for l in pick_session.lines %}
+        <tr>
+          <td class="px-3 py-2 font-mono text-xs">{{ l.sku_code or l.line_no or loop.index }}</td>
+          <td class="px-3 py-2">{{ l.qty_to_pick }}</td>
+          <td class="px-3 py-2">{{ l.status }}</td>
+          <td class="px-3 py-2">
+            {% if l.status == 'PENDING' %}
+            <form hx-post="/outbound/pick-sessions/{{ pick_session.pick_session_id }}/lines/{{ l.pick_line_id }}/confirm" hx-target="#outbound-pick-container" hx-swap="innerHTML" class="flex flex-wrap items-center gap-1.5">
+              <input type="hidden" name="version_no" value="{{ pick_session.version_no }}" />
+              <input type="hidden" name="pick_action_url" value="{{ pick_action_url or '/outbound' }}" />
+              <input type="text" name="qty_picked" value="{{ l.qty_to_pick }}" class="w-20 rounded border border-slate-300 px-2 py-1 text-xs" />
+              <input type="text" name="target_tote_barcode" placeholder="Mã rổ/tote" class="w-24 rounded border border-slate-300 px-2 py-1 text-xs" />
+              <button type="submit" class="rounded bg-emerald-600 px-2.5 py-1 text-xs text-white hover:bg-emerald-700">Xác nhận lấy</button>
+            </form>
+            {% else %}<span class="text-xs text-slate-400">Đã xử lý ({{ l.qty_picked }})</span>{% endif %}
+          </td>
+          <td class="px-3 py-2">
+            {% if l.status == 'PENDING' %}
+            <form hx-post="/outbound/pick-sessions/{{ pick_session.pick_session_id }}/lines/{{ l.pick_line_id }}/exception" hx-target="#outbound-pick-container" hx-swap="innerHTML" class="flex flex-wrap items-center gap-1.5">
+              <input type="hidden" name="version_no" value="{{ pick_session.version_no }}" />
+              <input type="hidden" name="pick_action_url" value="{{ pick_action_url or '/outbound' }}" />
+              <select name="exception_type" class="rounded border border-slate-300 px-2 py-1 text-xs bg-white">
+                <option value="EXCEPTION_SHORT">Thiếu hàng</option>
+                <option value="EXCEPTION_DAMAGED">Hư hỏng</option>
+                <option value="EXCEPTION_WRONG_LOT">Sai lô</option>
+              </select>
+              <select name="exception_reason" required class="max-w-[180px] rounded border border-slate-300 px-2 py-1 text-xs bg-white">
+                {% set rc_list = reason_codes if reason_codes else [{"reason_code": "DISCREPANCY_SHORT", "description": "Giao thiếu số lượng"}] %}
+                {% for rc in rc_list %}
+                <option value="{{ rc.reason_code }}" {% if rc.reason_code == "DISCREPANCY_SHORT" %}selected{% endif %}>{{ rc.reason_code }}{% if rc.description %} - {{ rc.description }}{% endif %}</option>
+                {% endfor %}
+              </select>
+              <input type="text" name="qty_actual" value="0" placeholder="SL thực" required class="w-16 rounded border border-slate-300 px-2 py-1 text-xs" />
+              <button type="submit" class="rounded bg-amber-600 px-2.5 py-1 text-xs text-white hover:bg-amber-700">Báo ngoại lệ</button>
+            </form>
+            {% else %}<span class="text-xs text-slate-400">{{ l.exception_reason or '-' }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>

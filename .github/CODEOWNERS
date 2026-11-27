@@ -1,0 +1,63 @@
+# Toàn bộ kho lưu trữ mặc định thuộc về Leader @binhdoan0201
+* @binhdoan0201
+
+# Các file dùng chung chỉ Leader @binhdoan0201 sở hữu
+server/app/core/ @binhdoan0201
+server/app/shared/ @binhdoan0201
+server/app/main.py @binhdoan0201
+database/ @binhdoan0201
+docker-compose.yml @binhdoan0201
+.github/ @binhdoan0201
+
+# Phân chia module theo thành viên phụ trách (Mục 8.1 Đặc tả sau cân bằng tải)
+
+# 1. Đoàn Duy Bình (@binhdoan0201): core, auth, inventory, integrations, master_data, dashboard
+server/app/modules/auth/ @binhdoan0201
+client/app/modules/auth/ @binhdoan0201
+docs/api/auth.md @binhdoan0201
+
+server/app/modules/inventory/ @binhdoan0201
+client/app/modules/inventory/ @binhdoan0201
+docs/api/inventory.md @binhdoan0201
+
+server/app/modules/integrations/ @binhdoan0201
+server/tests/*/integrations/ @binhdoan0201
+client/app/modules/integrations/ @binhdoan0201
+docs/api/integrations.md @binhdoan0201
+
+server/app/modules/master_data/ @binhdoan0201
+server/tests/*/master_data/ @binhdoan0201
+client/app/modules/master_data/ @binhdoan0201
+docs/api/master_data.md @binhdoan0201
+
+server/app/modules/dashboard/ @binhdoan0201
+server/tests/*/dashboard/ @binhdoan0201
+client/app/modules/dashboard/ @binhdoan0201
+docs/api/dashboard.md @binhdoan0201
+
+# 2. Mai Hữu Phước (@HuuPhuoc1235): inbound, cycle_count
+server/app/modules/inbound/ @HuuPhuoc1235
+server/tests/*/inbound/ @HuuPhuoc1235
+client/app/modules/inbound/ @HuuPhuoc1235
+docs/api/inbound.md @HuuPhuoc1235
+
+server/app/modules/cycle_count/ @HuuPhuoc1235
+server/tests/*/cycle_count/ @HuuPhuoc1235
+client/app/modules/cycle_count/ @HuuPhuoc1235
+docs/api/cycle_count.md @HuuPhuoc1235
+
+# 3. Hồ Quốc Cường (@quoccuong1108): outbound
+server/app/modules/outbound/ @quoccuong1108
+server/tests/*/outbound/ @quoccuong1108
+client/app/modules/outbound/ @quoccuong1108
+docs/api/outbound.md @quoccuong1108
+
+# 4. Nguyễn Đức Hiếu (@hieunguyen201104): tasks, approvals
+server/app/modules/tasks/ @hieunguyen201104
+client/app/modules/tasks/ @hieunguyen201104
+docs/api/tasks.md @hieunguyen201104
+
+server/app/modules/approvals/ @hieunguyen201104
+server/tests/*/approvals/ @hieunguyen201104
+client/app/modules/approvals/ @hieunguyen201104
+docs/api/approvals.md @hieunguyen201104

@@ -1,0 +1,31 @@
+{% if flash_msg %}<div class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{{ flash_msg }}</div>{% endif %}
+{% if api_error %}<div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>[{{ api_error.code }}]</strong> {{ api_error.message }}</div>{% endif %}
+<div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+  <table class="min-w-full divide-y divide-slate-200 text-sm">
+    <thead class="bg-slate-50 text-left font-semibold text-slate-600">
+      <tr>
+        <th class="px-4 py-3">Mã đơn ERP</th><th class="px-4 py-3">Loại</th><th class="px-4 py-3">Khách hàng</th><th class="px-4 py-3">Trạng thái</th><th class="px-4 py-3 text-right">Thao tác</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for o in orders %}
+      <tr class="hover:bg-slate-50">
+        <td class="px-4 py-3 font-medium text-slate-900">{{ o.erp_order_number }}</td>
+        <td class="px-4 py-3 text-slate-600">{{ o.order_type }}</td>
+        <td class="px-4 py-3 text-slate-600">{{ o.customer_name or '-' }}</td>
+        <td class="px-4 py-3"><span class="inline-flex rounded-full bg-blue-50 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">{{ o.status }}</span></td>
+        <td class="px-4 py-3 text-right space-x-2">
+          {% if o.status == 'NEW' and not o.erp_change_pending %}
+          <button hx-post="/outbound/orders/{{ o.order_id }}/allocate" hx-vals='{"version_no": {{ o.version_no }}, "strategy": "FEFO"}' hx-target="#outbound-orders-container" hx-swap="innerHTML" class="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700">Cấp phát FEFO</button>
+          {% if "SO-1" in perms %}
+          {% set auto_picker_id = pickers[0].id if (pickers | length == 1) else "" %}<span class="inline-flex items-center gap-1.5"><select aria-label="Người soạn hàng" class="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700" onchange="this.nextElementSibling.setAttribute('hx-vals', JSON.stringify({order_id: '{{ o.order_id }}', pick_mode: 'SINGLE_ORDER', picker_user_id: this.value}))"><option value="">-- Giao người soạn --</option>{% for p in pickers %}<option value="{{ p.id }}"{% if p.id == auto_picker_id %} selected{% endif %}>{{ p.label }}</option>{% endfor %}</select><button hx-post="/outbound/pick-sessions/create" hx-vals='{"order_id": "{{ o.order_id }}", "pick_mode": "SINGLE_ORDER", "picker_user_id": "{{ auto_picker_id }}"}' hx-target="#outbound-orders-container" hx-swap="innerHTML" onclick="var sel = this.previousElementSibling; if (!sel || !sel.value) { event.preventDefault(); event.stopImmediatePropagation(); alert('Vui lòng chọn người soạn hàng trước khi tạo phiên soạn.'); return false; }" class="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Tạo phiên soạn</button></span>
+          {% endif %}
+          {% else %}<span class="text-xs text-slate-400">v{{ o.version_no }}</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">Chưa có đơn xuất kho nào.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

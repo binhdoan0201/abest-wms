@@ -1,0 +1,111 @@
+{% extends "_base/layout.html" %}
+{% block title %}Kiểm kê kho (Cycle Count) - ABEST WMS{% endblock %}
+{% block content %}
+<div class="space-y-6 max-w-4xl mx-auto">
+  <h1 class="text-2xl font-bold text-slate-800">Kiểm kê kho (Đếm mù)</h1>
+
+  {% if flash_msg %}
+  <div class="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">{{ flash_msg }}</div>
+  {% endif %}
+  {% if api_error %}
+  <div class="rounded-lg bg-rose-50 border border-rose-200 p-3 text-sm text-rose-800">{{ api_error }}</div>
+  {% endif %}
+
+  {% if "TK-1.1" in perms %}
+  <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 space-y-3">
+    <h2 class="font-semibold text-slate-700">Tạo phiếu kiểm kê mới (Thủ kho)</h2>
+    <form method="post" action="/cycle-count/create" class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+      <select name="count_type" class="rounded-lg border-slate-300 text-sm">
+        <option value="PERIODIC">Định kỳ (PERIODIC)</option>
+        <option value="RANDOM">Ngẫu nhiên (RANDOM)</option>
+      </select>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Chọn vị trí kiểm kê (giữ Ctrl/Cmd hoặc click chọn nhiều)</label>
+        <select name="location_ids" multiple size="4" required class="w-full rounded-lg border-slate-300 text-sm">
+          {% for loc in locations %}
+          <option value="{{ loc.location_id }}">
+            {{ loc.location_code or loc.code }}{% if loc.zone_code %} ({{ loc.zone_code }}){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg px-4 py-2">Tạo & Khóa vị trí</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+    <h2 class="font-semibold text-slate-700 mb-3">Danh sách phiếu kiểm kê</h2>
+    <div class="divide-y">
+      {% for s in sheets %}
+      <div class="py-2.5 flex items-center justify-between">
+        <div>
+          <span class="font-semibold text-slate-800">{{ s.sheet_number }}</span>
+          <span class="ml-2 px-2 py-0.5 text-xs rounded bg-slate-100">{{ s.status }}</span>
+        </div>
+        <a href="/cycle-count?sheet_id={{ s.count_sheet_id }}" class="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium">Mở đếm</a>
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-400 py-3">Chưa có phiếu kiểm kê nào</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if selected_sheet %}
+  <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 space-y-4">
+    <div class="flex items-center justify-between border-b pb-3">
+      <div>
+        <h3 class="font-bold text-slate-800">Phiếu: {{ selected_sheet.sheet_number }}</h3>
+        <p class="text-xs text-slate-500">Trạng thái: {{ selected_sheet.status }}</p>
+      </div>
+      {% if "TK-1.1" in perms and selected_sheet.status != "CLOSED" %}
+      <form method="post" action="/cycle-count/{{ selected_sheet.count_sheet_id }}/close">
+        <button type="submit" class="px-4 py-2 bg-slate-800 text-white text-sm rounded-lg">Đóng phiếu & Mở khóa kệ</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="space-y-3">
+      {% for ln in selected_sheet.lines %}
+      {% set is_recount = (ln.status not in ["PENDING", "AUTO_APPROVED_Z", "APPROVED", "ADJUSTED", "REJECTED"]) %}
+      <div class="p-3.5 border rounded-xl {{ 'bg-amber-50/70 border-amber-200' if is_recount else 'bg-slate-50' }} space-y-2">
+        <div class="flex justify-between text-xs text-slate-600">
+          <span>Vị trí: <strong>{{ ln.location_code or location_code_map.get(ln.location_id|string, ln.location_id) }}</strong></span>
+          <span class="px-2 py-0.5 rounded bg-white border font-medium">{{ ln.status }}</span>
+        </div>
+        <div class="text-xs text-slate-500">
+          SKU: <strong>{{ ln.sku_code or sku_code_map.get(ln.sku_id|string, ln.sku_id) if ln.sku_id else "Vị trí trống" }}</strong> |
+          Tồn sổ sách: <strong>{{ ln.system_qty_snapshot if ln.system_qty_snapshot is not none else "ẨN (Đếm mù)" }}</strong>
+          {% if ln.variance_qty is not none %}
+          | Chênh lệch: <strong class="text-rose-600">{{ ln.variance_qty }}</strong>
+          {% endif %}
+        </div>
+
+        {% if "KK-1" in perms and ln.status not in ["AUTO_APPROVED_Z", "APPROVED", "ADJUSTED", "REJECTED"] %}
+        {% if is_recount %}
+        <div class="text-xs font-medium text-amber-800">
+          Đếm lại dòng lệch (bắt buộc nhân viên kiểm kê khác người đếm lần trước; nếu cùng người phải nhập lý do ngoại lệ).
+        </div>
+        <form method="post" action="/cycle-count/{{ selected_sheet.count_sheet_id }}/lines/{{ ln.count_line_id }}/recount" class="flex flex-col sm:flex-row gap-2 pt-1">
+          <input type="text" name="blind_counted_qty" required placeholder="Nhập số lượng đếm lại..." class="flex-1 rounded-lg border-amber-300 bg-white text-base py-2" />
+          <input type="text" name="override_reason" placeholder="Lý do nếu đếm lại cùng người..." class="rounded-lg border-slate-300 bg-white text-sm" />
+          <button type="submit" class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg text-sm">
+            Ghi nhận đếm lại
+          </button>
+        </form>
+        {% else %}
+        <form method="post" action="/cycle-count/{{ selected_sheet.count_sheet_id }}/lines/{{ ln.count_line_id }}/count" class="flex flex-col sm:flex-row gap-2 pt-1">
+          <input type="text" name="blind_counted_qty" required placeholder="Nhập số lượng thực tế đếm được..." class="flex-1 rounded-lg border-slate-300 text-base py-2" />
+          <button type="submit" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-sm">
+            Xác nhận đếm
+          </button>
+        </form>
+        {% endif %}
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

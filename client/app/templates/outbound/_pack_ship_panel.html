@@ -1,0 +1,93 @@
+<div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+  <h2 class="text-lg font-semibold text-slate-800">Khu vực Đóng gói & Xuất hàng GI (NV Đóng gói)</h2>
+  {% if flash_msg %}<div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{{ flash_msg }}</div>{% endif %}
+  {% if api_error %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>[{{ api_error.code }}]</strong> {{ api_error.message }}</div>{% endif %}
+  {% if gi_info %}
+    <div class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 space-y-1">
+      <div><strong>Phiếu GI:</strong> {{ gi_info.gi_number }} — Trạng thái đơn: <strong>{{ gi_info.order_status }}</strong></div>
+      <div><strong>Mã vận đơn TMS:</strong> {{ gi_info.waybill_text }}</div>
+    </div>
+  {% endif %}
+  <div id="pack-ship-forms" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <form hx-post="/outbound/pack-and-ship" hx-target="#outbound-pack-container" hx-swap="innerHTML" class="rounded-lg border border-slate-200 p-3 space-y-2">
+      <input type="hidden" name="action" value="package" />
+      <div class="font-medium text-sm text-slate-700">1. Đóng gói kiện hàng</div>
+      <select name="order_id" aria-label="Đơn xuất kho (Bước 1)" required class="pack-step-order w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">-- Chọn đơn xuất kho --</option>
+        {% for o in packing_orders or [] %}
+          <option value="{{ o.id }}" {% if selected_order_id == o.id %}selected{% endif %}>{{ o.label }}{% if o.status %} ({{ o.status }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      <select name="box_type_id" aria-label="Loại thùng" class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">-- Chọn loại thùng --</option>
+        {% for b in box_types or [] %}
+          <option value="{{ b.box_type_id or b.id }}">{{ b.box_code }} - {{ b.box_name }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="weight_kg" value="2.5" placeholder="Khối lượng (kg)" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs" />
+      <button type="submit" class="w-full rounded bg-indigo-600 py-1.5 text-xs font-medium text-white hover:bg-indigo-700">Tạo kiện đóng gói</button>
+    </form>
+    <form hx-post="/outbound/pack-and-ship" hx-target="#outbound-pack-container" hx-swap="innerHTML" class="rounded-lg border border-slate-200 p-3 space-y-2">
+      <input type="hidden" name="action" value="create_gi" />
+      <div class="font-medium text-sm text-slate-700">2. Lập phiếu xuất kho GI</div>
+      <select name="order_id" aria-label="Đơn xuất kho (Bước 2)" required class="pack-step-order w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">-- Chọn đơn xuất kho --</option>
+        {% for o in packing_orders or [] %}
+          <option value="{{ o.id }}" {% if selected_order_id == o.id %}selected{% endif %}>{{ o.label }}{% if o.status %} ({{ o.status }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      <select name="vehicle_id" aria-label="Xe và tài xế" class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">-- Chọn xe & tài xế --</option>
+        {% for v in vehicles or [] %}
+          <option value="{{ v.vehicle_id or v.id }}">{{ v.license_plate }} – {{ v.driver_name or "Chưa có tài xế" }}</option>
+        {% endfor %}
+      </select>
+      <div class="text-[11px] text-slate-500">Vận đơn TMS: {% if gi_info %}{{ gi_info.waybill_text }}{% else %}chờ vận đơn{% endif %}</div>
+      <button type="submit" class="w-full rounded bg-blue-600 py-1.5 text-xs font-medium text-white hover:bg-blue-700">Lập phiếu GI</button>
+    </form>
+    <form hx-post="/outbound/pack-and-ship" hx-target="#outbound-pack-container" hx-swap="innerHTML" class="rounded-lg border border-slate-200 p-3 space-y-2">
+      <input type="hidden" name="action" value="confirm_gi" />
+      <input type="hidden" name="order_id" value="{{ selected_order_id or '' }}" class="pack-step-order-input" />
+      <div class="font-medium text-sm text-slate-700">3. Xác nhận giao hàng (SHIPPED)</div>
+      {% set active_gi = selected_gi_id or (gi_info.gi_id if gi_info else '') %}
+      <select id="pack-gi-select" name="gi_id" aria-label="Phiếu xuất kho GI" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs bg-white">
+        <option value="">-- Chọn phiếu GI --</option>
+        {% for g in gi_options or [] %}
+          <option value="{{ g.id }}" {% if active_gi == g.id %}selected{% endif %}>{{ g.label }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="driver_signature_data" placeholder="Tài xế ký (nhập họ tên)" required class="w-full rounded border border-slate-300 px-2.5 py-1.5 text-xs" />
+      <button type="submit" class="w-full rounded bg-emerald-600 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Xác nhận xuất kho</button>
+    </form>
+  </div>
+</div>
+<script>
+(function () {
+  const c = document.getElementById("pack-ship-forms");
+  if (!c) return;
+  const sels = Array.from(c.querySelectorAll("select.pack-step-order"));
+  const hiddens = Array.from(c.querySelectorAll("input.pack-step-order-input"));
+  const giSel = document.getElementById("pack-gi-select");
+  const reloadGi = (orderId) => {
+    if (!giSel) return;
+    const curGi = encodeURIComponent(giSel.value || "");
+    const oid = encodeURIComponent(orderId || "");
+    if (window.htmx) {
+      window.htmx.ajax("GET", `/outbound/pack-and-ship/gi-options?order_id=${oid}&gi_id=${curGi}`, {
+        target: "#pack-gi-select",
+        swap: "innerHTML",
+      });
+    } else {
+      fetch(`/outbound/pack-and-ship/gi-options?order_id=${oid}&gi_id=${curGi}`)
+        .then((r) => r.text())
+        .then((html) => { giSel.innerHTML = html; })
+        .catch(() => {});
+    }
+  };
+  sels.forEach((s) => s.addEventListener("change", () => {
+    sels.forEach((o) => { if (o !== s) o.value = s.value; });
+    hiddens.forEach((h) => { h.value = s.value; });
+    reloadGi(s.value);
+  }));
+})();
+</script>

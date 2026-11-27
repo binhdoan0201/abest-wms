@@ -1,0 +1,204 @@
+{# Thân bảng điều hành; dùng cho lần tải đầu và cho HTMX làm mới. #}
+{% set t = dash.tasks %}
+{% set inv = dash.inventory %}
+{% set o = dash.orders %}
+
+{% macro card(label, value, tone="slate", hint=None) %}
+<div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+    <p class="text-[11px] font-bold uppercase tracking-wider text-slate-500">{{ label }}</p>
+    <p class="mt-1 text-2xl sm:text-3xl font-black font-mono
+        {% if tone == 'red' %}text-rose-600{% elif tone == 'amber' %}text-amber-600{% elif tone == 'green' %}text-emerald-600{% else %}text-slate-800{% endif %}">
+        {{ value }}
+    </p>
+    {% if hint %}<p class="text-xs text-slate-500 mt-0.5">{{ hint }}</p>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro pct(value) %}{% if value is none %}–{% else %}{{ value }}%{% endif %}{% endmacro %}
+
+{% macro section_error(name) %}
+{% if dash.errors[name] %}
+<div class="bg-rose-50 border-l-4 border-rose-500 p-3 rounded-r-xl text-xs sm:text-sm text-rose-700" role="alert">
+    Không tải được số liệu ({{ dash.errors[name].code }}): {{ dash.errors[name].message }}
+</div>
+{% endif %}
+{% endmacro %}
+
+<div class="space-y-5">
+    <p class="text-xs text-slate-500 text-right">Cập nhật lúc {{ dash.updated_at }}</p>
+
+    {# ----- Cảnh báo ----- #}
+    <section aria-labelledby="alerts-title" class="space-y-2">
+        <h2 id="alerts-title" class="text-sm font-bold text-slate-700">Cảnh báo</h2>
+        {% if dash.alerts %}
+            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {% for a in dash.alerts %}
+            <div class="flex items-center justify-between gap-3 px-3 py-2 rounded-xl border text-xs sm:text-sm
+                {% if a.level == 'CRITICAL' %}bg-rose-50 border-rose-200 text-rose-800
+                {% elif a.level == 'WARNING' %}bg-amber-50 border-amber-200 text-amber-800
+                {% else %}bg-sky-50 border-sky-200 text-sky-800{% endif %}">
+                <span class="font-medium">
+                    <span class="text-[10px] font-black uppercase tracking-wider mr-1.5">
+                        {% if a.level == 'CRITICAL' %}Nghiêm trọng{% elif a.level == 'WARNING' %}Chú ý{% else %}Thông tin{% endif %}
+                    </span>
+                    {{ a.message }}
+                </span>
+                <span class="font-mono font-bold">{{ a.count }}</span>
+            </div>
+            {% endfor %}
+            </div>
+        {% else %}
+            <div class="p-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm">
+                Không có cảnh báo nào.
+            </div>
+        {% endif %}
+    </section>
+
+    {# ----- Task (TK-2.1) ----- #}
+    <section aria-labelledby="tasks-title" class="space-y-2">
+        <h2 id="tasks-title" class="text-sm font-bold text-slate-700">Nhiệm vụ</h2>
+        {{ section_error("tasks") }}
+        {% if t %}
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {{ card("Đang mở", t.open_tasks, hint=t.unassigned_tasks ~ " chưa giao") }}
+            {{ card("Đang làm", t.in_progress_tasks) }}
+            {{ card("Quá hạn", t.overdue_tasks, "red" if t.overdue_tasks else "slate", hint=t.urgent_open_tasks ~ " task khẩn đang mở") }}
+            {{ card("Xong hôm nay", t.completed_today, "green", hint="Đúng hạn " ~ pct(t.on_time_rate_today)) }}
+        </div>
+        {% set stage_labels = {"NHAN_HANG": "Nhận hàng", "CAT_HANG": "Cất hàng", "SOAN_HANG": "Soạn hàng", "DONG_GOI_XUAT": "Đóng gói, xuất", "KIEM_KE": "Kiểm kê", "QUAN_LY_CHUNG": "Quản lý chung"} %}
+        {% if t.open_by_stage %}
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+            <p class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">Task đang mở theo khâu</p>
+            <dl class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
+                {% for stage, n in t.open_by_stage|dictsort %}
+                <div class="bg-slate-50 rounded-lg px-3 py-2">
+                    <dt class="text-xs text-slate-500">{{ stage_labels.get(stage|upper, stage) }}</dt>
+                    <dd class="font-mono font-bold">{{ n }}</dd>
+                </div>
+                {% endfor %}
+            </dl>
+        </div>
+        {% endif %}
+        {% if t.overdue_list %}
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <table class="min-w-full divide-y divide-slate-200 text-left text-xs sm:text-sm">
+                <caption class="sr-only">Task quá hạn</caption>
+                <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[11px]">
+                    <tr>
+                        <th class="px-3 py-2">Loại</th><th class="px-3 py-2">Ưu tiên</th>
+                        <th class="px-3 py-2">Khu</th><th class="px-3 py-2">Người làm</th>
+                        <th class="px-3 py-2 text-right">Trễ (phút)</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for row in t.overdue_list %}
+                    <tr>
+                        <td class="px-3 py-2 font-mono">{{ row.task_type }}</td>
+                        <td class="px-3 py-2">{{ row.priority }}</td>
+                        <td class="px-3 py-2">{{ row.zone_code or "–" }}</td>
+                        <td class="px-3 py-2">{{ row.assigned_to_name or "Chưa giao" }}</td>
+                        <td class="px-3 py-2 text-right font-mono font-bold text-rose-600">{{ row.minutes_overdue }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% endif %}
+    </section>
+
+    {# ----- Tồn kho ----- #}
+    <section aria-labelledby="inv-title" class="space-y-2">
+        <h2 id="inv-title" class="text-sm font-bold text-slate-700">Tồn kho</h2>
+        {{ section_error("inventory") }}
+        {% if inv %}
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {{ card("SKU đang có tồn", inv.skus_in_stock, hint=inv.pallets_in_stock ~ " pallet") }}
+            {{ card("Tồn khả dụng", inv.quantities.available, hint="Hư hỏng " ~ inv.quantities.damaged) }}
+            {{ card("Lấp đầy vị trí", pct(inv.locations.occupancy_rate), hint=inv.locations.occupied ~ "/" ~ inv.locations.total ~ " vị trí, khóa " ~ inv.locations.locked) }}
+            {{ card("Lô hết hạn / sắp hết", inv.expired_lots ~ " / " ~ inv.near_expiry_lots, "red" if inv.expired_lots else ("amber" if inv.near_expiry_lots else "slate"), hint="Trong " ~ inv.near_expiry_days ~ " ngày tới") }}
+        </div>
+        <div class="grid lg:grid-cols-2 gap-3">
+            {% if inv.expiring_list %}
+            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                <table class="min-w-full divide-y divide-slate-200 text-left text-xs sm:text-sm">
+                    <caption class="text-left px-3 pt-3 text-[11px] font-bold uppercase text-slate-500">Lô hết hạn hoặc sắp hết hạn</caption>
+                    <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[11px]">
+                        <tr><th class="px-3 py-2">SKU</th><th class="px-3 py-2">Lô</th><th class="px-3 py-2">Hạn</th><th class="px-3 py-2 text-right">Còn (ngày)</th><th class="px-3 py-2 text-right">Tồn</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        {% for lot in inv.expiring_list %}
+                        <tr>
+                            <td class="px-3 py-2 font-mono">{{ lot.sku_code }}</td>
+                            <td class="px-3 py-2 font-mono">{{ lot.lot_number }}</td>
+                            <td class="px-3 py-2">{{ lot.expiry_date }}</td>
+                            <td class="px-3 py-2 text-right font-mono font-bold {% if lot.days_left < 0 %}text-rose-600{% else %}text-amber-600{% endif %}">{{ lot.days_left }}</td>
+                            <td class="px-3 py-2 text-right font-mono">{{ lot.qty_on_hand }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+            {% if inv.below_min_stock_list %}
+            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                <table class="min-w-full divide-y divide-slate-200 text-left text-xs sm:text-sm">
+                    <caption class="text-left px-3 pt-3 text-[11px] font-bold uppercase text-slate-500">SKU dưới mức tồn tối thiểu ({{ inv.below_min_stock_skus }})</caption>
+                    <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[11px]">
+                        <tr><th class="px-3 py-2">SKU</th><th class="px-3 py-2">Tên</th><th class="px-3 py-2 text-right">Khả dụng</th><th class="px-3 py-2 text-right">Tối thiểu</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        {% for s in inv.below_min_stock_list %}
+                        <tr>
+                            <td class="px-3 py-2 font-mono">{{ s.sku_code }}</td>
+                            <td class="px-3 py-2">{{ s.sku_name }}</td>
+                            <td class="px-3 py-2 text-right font-mono font-bold text-amber-600">{{ s.qty_available }}</td>
+                            <td class="px-3 py-2 text-right font-mono">{{ s.min_stock_level }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </section>
+
+    {# ----- Đơn trong ngày ----- #}
+    <section aria-labelledby="orders-title" class="space-y-2">
+        <h2 id="orders-title" class="text-sm font-bold text-slate-700">Đơn trong ngày</h2>
+        {{ section_error("orders") }}
+        {% if o %}
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {{ card("Đơn xuất đang mở", o.outbound.open_orders, hint=o.outbound.urgent_open ~ " đơn khẩn, " ~ o.outbound.on_hold ~ " tạm dừng") }}
+            {{ card("Trễ giờ cắt xe", o.outbound.late, "red" if o.outbound.late else "slate") }}
+            {{ card("Hoàn tất đơn hôm nay", pct(o.outbound.fulfillment_rate_today), "green", hint=o.outbound.due_today_shipped ~ "/" ~ o.outbound.due_today ~ " đơn, " ~ o.outbound.gi_confirmed_today ~ " GI đã xuất") }}
+            {{ card("Hồ sơ chờ duyệt", o.approvals.pending_total, "amber" if o.approvals.overdue else "slate", hint=o.approvals.overdue ~ " quá hạn SLA") }}
+            {{ card("PO đang mở", o.inbound.open_pos, hint=o.inbound.pos_due_today ~ " dự kiến giao hôm nay") }}
+            {{ card("PO trễ hẹn", o.inbound.pos_late, "amber" if o.inbound.pos_late else "slate") }}
+            {{ card("Phiếu nhận hôm nay", o.inbound.grns_today, hint=o.inbound.grns_closed_today ~ " đã hoàn tất, " ~ o.inbound.grns_pending_approval ~ " chờ duyệt") }}
+            {{ card("Lỗi đồng bộ ERP/TMS", o.integration_failures, "amber" if o.integration_failures else "slate") }}
+        </div>
+        {% if o.late_orders %}
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <table class="min-w-full divide-y divide-slate-200 text-left text-xs sm:text-sm">
+                <caption class="text-left px-3 pt-3 text-[11px] font-bold uppercase text-slate-500">Đơn trễ giờ cắt xe</caption>
+                <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[11px]">
+                    <tr><th class="px-3 py-2">Số đơn ERP</th><th class="px-3 py-2">Loại</th><th class="px-3 py-2">Trạng thái</th><th class="px-3 py-2 text-right">Trễ (phút)</th></tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for row in o.late_orders %}
+                    <tr>
+                        <td class="px-3 py-2 font-mono">{{ row.erp_order_number }}{% if row.is_urgent %} <span class="ml-1 px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-bold">KHẨN</span>{% endif %}</td>
+                        <td class="px-3 py-2">{{ row.order_type }}</td>
+                        <td class="px-3 py-2">{{ row.status }}</td>
+                        <td class="px-3 py-2 text-right font-mono font-bold text-rose-600">{{ row.minutes_late }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% endif %}
+    </section>
+</div>
