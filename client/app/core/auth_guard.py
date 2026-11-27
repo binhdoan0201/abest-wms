@@ -44,8 +44,17 @@ def get_optional_user(request: Request) -> dict[str, Any] | None:
         return None
 
 
-# Trang đầu sau đăng nhập: BGĐ vào bảng điều hành (A-13), vai trò khác vào tra cứu tồn.
-HOME_BY_ROLE: dict[str, str] = {"bgd": "/dashboard", "admin": "/master-data"}
+# Trang đầu sau đăng nhập: mỗi vai trò vào thẳng màn hình làm việc chính của mình.
+# nv-kiemke không có QL-1.1 (đếm mù) nên không được vào tra cứu tồn.
+HOME_BY_ROLE: dict[str, str] = {
+    "bgd": "/dashboard",
+    "admin": "/master-data",
+    "nv-nhan": "/inbound",
+    "nv-cat": "/inbound",
+    "nv-soan": "/outbound/picking",
+    "nv-dongoi": "/outbound/packing",
+    "nv-kiemke": "/cycle-count",
+}
 DEFAULT_HOME = "/inventory"
 
 
