@@ -65,13 +65,14 @@
             {{ card("Quá hạn", t.overdue_tasks, "red" if t.overdue_tasks else "slate", hint=t.urgent_open_tasks ~ " task khẩn đang mở") }}
             {{ card("Xong hôm nay", t.completed_today, "green", hint="Đúng hạn " ~ pct(t.on_time_rate_today)) }}
         </div>
+        {% set stage_labels = {"NHAN_HANG": "Nhận hàng", "CAT_HANG": "Cất hàng", "SOAN_HANG": "Soạn hàng", "DONG_GOI_XUAT": "Đóng gói, xuất", "KIEM_KE": "Kiểm kê", "QUAN_LY_CHUNG": "Quản lý chung"} %}
         {% if t.open_by_stage %}
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
             <p class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">Task đang mở theo khâu</p>
             <dl class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
                 {% for stage, n in t.open_by_stage|dictsort %}
                 <div class="bg-slate-50 rounded-lg px-3 py-2">
-                    <dt class="text-xs text-slate-500">{{ stage }}</dt>
+                    <dt class="text-xs text-slate-500">{{ stage_labels.get(stage|upper, stage) }}</dt>
                     <dd class="font-mono font-bold">{{ n }}</dd>
                 </div>
                 {% endfor %}
