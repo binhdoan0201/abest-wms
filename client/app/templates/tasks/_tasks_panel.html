@@ -64,9 +64,9 @@
                   {% endif %}
                 {% endfor %}
                 {% if not ns.label and user and t.assigned_to == user.user_id %}
-                  {% set ns.label = user.full_name or user.username or 'B?n' %}
+                  {% set ns.label = user.full_name or user.username or 'Bạn' %}
                 {% endif %}
-                <span class="font-medium">{{ ns.label or '?? giao' }}</span>
+                <span class="font-medium">{{ ns.label or 'Đã giao' }}</span>
               {% else %}
                 <span class="text-slate-400">Chưa giao</span>
               {% endif %}

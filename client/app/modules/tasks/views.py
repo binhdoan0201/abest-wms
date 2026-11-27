@@ -61,7 +61,7 @@ def _load_workers(api: ApiClient) -> list[dict[str, Any]]:
 
 
 def _resolve_task_open_url(task: dict[str, Any]) -> str | None:
-    """T?o ???ng d?n m? tr?c ti?p ch?ng t? nghi?p v? t??ng ?ng v?i t?ng lo?i task."""
+    """Tạo đường dẫn mở trực tiếp chứng từ nghiệp vụ tương ứng với từng loại task."""
     task_type = str(task.get("task_type") or "").upper()
     doc_type = str(task.get("ref_doc_type") or "").upper()
     doc_id = str(task.get("ref_doc_id") or "").strip()
