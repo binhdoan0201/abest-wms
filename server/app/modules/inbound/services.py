@@ -413,9 +413,16 @@ class InboundService:
                 message="Nhân viên nhận hàng chỉ được xem phiếu của chính mình",
                 http_status=403,
             )
+        open_app = InboundRepository.get_open_approval_for_grn(db, grn_id)
+        can_recount = bool(
+            open_app is not None
+            and open_app[1] == "NEED_INFO"
+            and InboundRepository.has_recount_request_history(db, open_app[0])
+        )
         hide_blind = grn.is_blind_receipt and user.role_code == HIDE_QTY_ROLE
         lines = InboundRepository.get_grn_lines(db, grn_id)
         res = _grn_dict(grn, hide_blind)
+        res["can_recount"] = can_recount
         res["lines"] = [_grn_line_dict(ln, hide_blind) for ln in lines]
         return res
 
@@ -757,6 +764,12 @@ class InboundService:
             dock_loc = asn_obj.assigned_dock_location_id if asn_obj else None
         if dock_loc is None:
             dock_loc = InboundRepository.get_first_dock_location(db, grn.warehouse_id)
+
+        for ln in lines:
+            if ln.qty_damaged <= 0 and ln.damaged_pallet_id is not None:
+                ln.damaged_pallet_id = None
+        db.flush()
+        InboundRepository.cleanup_empty_damaged_pallets(db, grn.grn_id)
 
         if approval is None:
             # Tự động duyệt

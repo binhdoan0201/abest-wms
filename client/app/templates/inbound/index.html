@@ -1,6 +1,28 @@
 {% extends "_base/layout.html" %}
 {% block title %}Nhập kho & Cất hàng - ABEST WMS{% endblock %}
 {% block content %}
+{% set grn_status_vi = {
+  "DRAFT": "Nháp",
+  "COUNTING": "Đang kiểm đếm",
+  "PENDING_D1": "Chờ duyệt (Cấp 1)",
+  "PENDING_D2": "Chờ duyệt (Cấp 2)",
+  "PENDING_D3": "Chờ duyệt (Cấp 3)",
+  "NEED_INFO": "Yêu cầu đếm lại",
+  "DISCREPANCY": "Có chênh lệch",
+  "RECOUNTING": "Đang đếm lại",
+  "APPROVED": "Đã duyệt",
+  "REJECTED": "Từ chối",
+  "CLOSED": "Đã hoàn tất",
+  "SYNCED_ERP": "Đã đồng bộ ERP"
+} %}
+{% set po_status_vi = {
+  "PENDING": "Chờ nhận hàng",
+  "RECEIVING": "Đang nhận hàng",
+  "PARTIAL_RECEIVED": "Nhận một phần",
+  "FULLY_RECEIVED": "Đã nhận đủ",
+  "CLOSED": "Đã đóng",
+  "CANCELLED": "Đã hủy"
+} %}
 <div class="space-y-6">
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-bold text-slate-800">Phân hệ Nhập kho & Cất hàng</h1>
@@ -24,13 +46,9 @@
           <select name="po_id" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
             <option value="">-- Nhận không PO (Blind Receipt) --</option>
             {% for po in pos %}
-            <option value="{{ po.po_id }}">{{ po.erp_po_number }} ({{ po.status }})</option>
+            <option value="{{ po.po_id }}">{{ po.erp_po_number }} ({{ po_status_vi.get(po.status, po.status) }})</option>
             {% endfor %}
           </select>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-600">ASN ID (nếu có)</label>
-          <input type="text" name="asn_id" placeholder="Mã/ID ASN nếu có..." class="mt-1 w-full rounded-lg border-slate-300 text-sm" />
         </div>
         <button type="submit" class="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">
           Mở phiếu GRN
@@ -57,7 +75,7 @@
               <td class="py-2 px-3 font-medium">{{ g.grn_number }}</td>
               <td class="py-2 px-3">
                 <span class="px-2 py-0.5 rounded text-xs {{ 'bg-amber-100 text-amber-800 font-semibold' if (g.status in ['NEED_INFO', 'DISCREPANCY', 'RECOUNTING'] or g.status.startswith('PENDING_D')) else 'bg-slate-100' }}">
-                  {{ g.status }}
+                  {{ 'Yêu cầu đếm lại' if g.can_recount else grn_status_vi.get(g.status, g.status) }}
                 </span>
               </td>
               <td class="py-2 px-3">{{ g.recount_count }}</td>
@@ -80,7 +98,7 @@
       <div>
         <h3 class="text-lg font-bold text-slate-800">Chi tiết GRN: {{ selected_grn.grn_number }}</h3>
         <p class="text-xs text-slate-500">
-          Trạng thái: <strong>{{ selected_grn.status }}</strong> |
+          Trạng thái: <strong>{{ 'Yêu cầu đếm lại' if selected_grn.can_recount else grn_status_vi.get(selected_grn.status, selected_grn.status) }}</strong> |
           Phiên bản: {{ selected_grn.version_no }} |
           Lần đếm lại: {{ selected_grn.recount_count }}
         </p>
@@ -161,12 +179,12 @@
     </script>
     {% endif %}
 
-    {% if (selected_grn.status in ["NEED_INFO", "DISCREPANCY", "RECOUNTING"] or selected_grn.status.startswith("PENDING_D")) and ("NH-5" in perms or "NH-1" in perms) %}
+    {% if selected_grn.can_recount and ("NH-5" in perms or "NH-1" in perms) %}
     <form method="post" action="/inbound/grns/{{ selected_grn.grn_id }}/recount" class="space-y-3 bg-amber-50 border border-amber-200 p-4 rounded-xl">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h4 class="font-semibold text-amber-900 text-sm">Yêu cầu đếm lại phiếu nhận hàng (NEED_INFO)</h4>
-          <p class="text-xs text-amber-800">Nhập lại số lượng thực tế và hư hỏng cho các dòng bên dưới (bắt buộc nhân viên khác người đếm trước).</p>
+          <h4 class="font-semibold text-amber-900 text-sm">Yêu cầu đếm lại phiếu nhận hàng</h4>
+          <p class="text-xs text-amber-800">Thủ kho đã yêu cầu đếm lại. Vui lòng nhập số lượng thực tế và hư hỏng (bắt buộc nhân viên khác người đếm trước).</p>
         </div>
         <button type="submit" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg">
           Xác nhận đếm lại
@@ -179,7 +197,6 @@
             <tr>
               <th class="py-2 px-3">Mã SKU</th>
               <th class="py-2 px-3">ĐVT</th>
-              <th class="py-2 px-3">SL đếm cũ</th>
               <th class="py-2 px-3">SL thực đếm lại</th>
               <th class="py-2 px-3">SL hư hỏng lại</th>
             </tr>
@@ -192,12 +209,11 @@
                 <input type="hidden" name="grn_line_id" value="{{ ln.grn_line_id }}" />
               </td>
               <td class="py-2 px-3">{{ ln.uom_code }}</td>
-              <td class="py-2 px-3 text-slate-500">{{ ln.qty_actual }}</td>
               <td class="py-2 px-3">
-                <input type="text" name="qty_actual" value="{{ ln.qty_actual }}" required class="w-28 rounded border-slate-300 text-sm" />
+                <input type="text" name="qty_actual" value="" placeholder="Nhập SL thực đếm..." required class="w-36 rounded border-slate-300 text-sm" />
               </td>
               <td class="py-2 px-3">
-                <input type="text" name="qty_damaged" value="{{ ln.qty_damaged or '0' }}" class="w-24 rounded border-slate-300 text-sm" />
+                <input type="text" name="qty_damaged" value="" placeholder="0" class="w-28 rounded border-slate-300 text-sm" />
               </td>
             </tr>
             {% endfor %}

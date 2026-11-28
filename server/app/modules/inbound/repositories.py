@@ -330,6 +330,42 @@ class InboundRepository:
         return int(ver or 1)
 
     @staticmethod
+    def cleanup_empty_damaged_pallets(db: Session, grn_id: uuid.UUID) -> None:
+        rows = db.execute(
+            text(
+                """
+                SELECT p.pallet_id
+                FROM pallets p
+                WHERE p.source_grn_id = :grn_id
+                  AND p.status = 'DAMAGED_HOLD'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM grn_lines gl
+                      WHERE gl.damaged_pallet_id = p.pallet_id AND gl.qty_damaged > 0
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM inventory_balances ib
+                      WHERE ib.pallet_id = p.pallet_id
+                        AND (ib.qty_available > 0 OR ib.qty_damaged > 0 OR ib.qty_allocated > 0)
+                  );
+                """
+            ),
+            {"grn_id": grn_id},
+        ).fetchall()
+        for r in rows:
+            db.execute(
+                text(
+                    """
+                    UPDATE pallets
+                    SET status = CAST('EMPTY' AS pallet_status_type),
+                        source_grn_id = NULL,
+                        version_no = version_no + 1
+                    WHERE pallet_id = :pid;
+                    """
+                ),
+                {"pid": r[0]},
+            )
+
+    @staticmethod
     def get_open_approval_for_grn(db: Session, grn_id: uuid.UUID) -> tuple[uuid.UUID, str] | None:
         row = db.execute(
             text(
@@ -433,7 +469,13 @@ class InboundRepository:
                            WHERE ib.location_id = l.location_id
                              AND ib.sku_id = ANY(:sku_ids)
                              AND ib.qty_available > 0
-                       ) AS has_same_sku
+                       ) AS has_same_sku,
+                       EXISTS (
+                           SELECT 1 FROM inventory_balances ib
+                           WHERE ib.location_id = l.location_id
+                             AND NOT (ib.sku_id = ANY(:sku_ids))
+                             AND (ib.qty_available > 0 OR ib.qty_allocated > 0)
+                       ) AS has_other_sku
                 FROM locations l
                 JOIN zones z ON z.zone_id = l.zone_id
                 WHERE l.warehouse_id = :wh
@@ -442,7 +484,7 @@ class InboundRepository:
                   AND z.is_active = TRUE
                   AND l.status IN ('EMPTY', 'PARTIAL')
                   AND (:excl_loc IS NULL OR l.location_id <> :excl_loc)
-                ORDER BY has_same_sku DESC, l.current_capacity_pct DESC, l.location_code ASC
+                ORDER BY has_same_sku DESC, has_other_sku ASC, l.current_capacity_pct DESC, l.location_code ASC
                 LIMIT 5;
                 """
             ),
