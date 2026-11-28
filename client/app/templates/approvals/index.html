@@ -65,19 +65,19 @@
             {% for item in items %}
             <tr class="hover:bg-slate-50">
               <td class="px-3 py-3">
-                <div class="font-semibold text-slate-800">{{ item.object_type }}</div>
-                <div class="text-xs text-slate-500 font-mono">{{ item.object_id }}</div>
-                <div class="text-[11px] text-slate-400">v{{ item.version_no }} &bull; SLA: {{ item.sla_due_at or 'N/A' }}</div>
+                <div class="font-semibold text-slate-800">{{ item.object_type|vi_label }}</div>
+                <div class="text-xs text-slate-600 font-mono">{{ item.object_ref or item.object_id }}</div>
+                <div class="text-[11px] text-slate-400">v{{ item.version_no }}{% if item.sla_due_at %} &bull; Hạn {{ item.sla_due_at|vn_datetime }}{% endif %}</div>
               </td>
               <td class="px-3 py-3">
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-800">{{ item.current_tier }}</span>
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold {% if item.status == 'APPROVED' %}bg-emerald-100 text-emerald-800{% elif item.status == 'REJECTED' %}bg-rose-100 text-rose-800{% elif item.status == 'NEED_INFO' %}bg-amber-100 text-amber-800{% else %}bg-blue-100 text-blue-800{% endif %}">{{ item.status }}</span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-800">{{ item.current_tier|vi_label }}</span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold {% if item.status == 'APPROVED' %}bg-emerald-100 text-emerald-800{% elif item.status == 'REJECTED' %}bg-rose-100 text-rose-800{% elif item.status == 'NEED_INFO' %}bg-amber-100 text-amber-800{% elif item.status == 'SUPERSEDED' %}bg-slate-100 text-slate-500{% else %}bg-blue-100 text-blue-800{% endif %}">{{ item.status|vi_label }}</span>
                 {% if item.locked_by_viewer_id %}
                 <div class="text-[11px] text-amber-700 mt-1">🔒 Đang có người xem</div>
                 {% endif %}
               </td>
               <td class="px-3 py-3 text-right font-mono font-semibold text-slate-800">
-                {{ item.discrepancy_value_amount }}
+                {{ item.discrepancy_value_amount|vnd }}
               </td>
               <td class="px-3 py-3 text-right">
                 <button type="button"

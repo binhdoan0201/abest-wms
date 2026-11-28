@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from client.app.core.api_client import ApiClient, ClientApiError
 from client.app.core.auth_guard import build_user_menu, get_current_user
+from client.app.core.formatting import format_qty
 from client.app.core.session import get_session_token
 
 router = APIRouter(tags=["Inventory Views"])
@@ -76,7 +77,7 @@ def _qty(value: Any) -> Decimal:
 
 
 def _fmt(value: Decimal) -> str:
-    return f"{value:,.3f}".rstrip("0").rstrip(".") if value % 1 else f"{value:,.0f}"
+    return format_qty(value)
 
 
 def _balance_rows(balances: list[Any], maps: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:

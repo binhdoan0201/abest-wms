@@ -87,14 +87,50 @@ class ApprovalResponse(BaseModel):
     final_decided_at: datetime | None = None
     version_no: int
     created_at: datetime
+    object_ref: str | None = Field(
+        default=None,
+        description="Số chứng từ nguồn để hiển thị (số GRN, hoặc `số phiếu kiểm kê / vị trí`)",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
 
+class ApprovalSourceLine(BaseModel):
+    """Một dòng chênh lệch của chứng từ nguồn."""
+
+    sku_code: str | None = None
+    sku_name: str | None = None
+    uom_code: str | None = None
+    lot_number: str | None = None
+    location_code: str | None = None
+    qty_expected: Decimal | None = Field(
+        default=None, description="GRN: SL chứng từ; kiểm kê: tồn sổ sách lúc khóa vị trí"
+    )
+    qty_counted: Decimal | None = None
+    qty_damaged: Decimal | None = None
+    qty_variance: Decimal | None = None
+    variance_amount: Decimal | None = None
+    reason_code: str | None = None
+    reason_description: str | None = None
+
+
+class ApprovalSource(BaseModel):
+    """Tóm tắt chứng từ nguồn để người duyệt thấy lệch gì trước khi quyết định."""
+
+    doc_type: Literal["GRN", "CYCLE_COUNT"]
+    doc_number: str
+    doc_status: str
+    recount_count: int = 0
+    parent_doc_number: str | None = Field(default=None, description="GRN: số PO ERP")
+    proposer_name: str | None = None
+    lines: list[ApprovalSourceLine] = []
+
+
 class ApprovalDetailResponse(ApprovalResponse):
-    """Chi tiết hồ sơ phê duyệt kèm toàn bộ lịch sử."""
+    """Chi tiết hồ sơ phê duyệt kèm toàn bộ lịch sử và chứng từ nguồn."""
 
     histories: list[ApprovalHistoryItem] = []
+    source: ApprovalSource | None = None
 
 
 class EscalateExpiredResponse(BaseModel):
