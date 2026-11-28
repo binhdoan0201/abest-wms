@@ -422,6 +422,7 @@ def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None
         db.commit()
         db.close()
 
+
 def test_damaged_pallet_cleanup_and_reuse_across_recounts() -> None:
     """Pallet DMG bị dọn sang EMPTY khi hết hư vẫn tái sử dụng được khi đếm lại lần 2 có hàng hư."""
     from server.app.modules.inbound.repositories import InboundRepository

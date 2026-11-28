@@ -91,21 +91,13 @@ def test_get_grn_detail_can_recount_only_when_need_info_and_requested(
     )
     app_id = uuid.uuid4()
 
-    monkeypatch.setattr(
-        inbound_services, "_require_warehouse", lambda _u: None
-    )
-    monkeypatch.setattr(
-        inbound_services, "enforce_warehouse_scope", lambda _u, _w: None
-    )
+    monkeypatch.setattr(inbound_services, "_require_warehouse", lambda _u: None)
+    monkeypatch.setattr(inbound_services, "enforce_warehouse_scope", lambda _u, _w: None)
     monkeypatch.setattr(
         inbound_services.InboundRepository, "get_grn_by_id", lambda _db, _gid: fake_grn
     )
-    monkeypatch.setattr(
-        inbound_services.InboundRepository, "get_grn_lines", lambda _db, _gid: []
-    )
-    monkeypatch.setattr(
-        inbound_services, "_grn_dict", lambda _g, _hb: {"grn_id": str(grn_id)}
-    )
+    monkeypatch.setattr(inbound_services.InboundRepository, "get_grn_lines", lambda _db, _gid: [])
+    monkeypatch.setattr(inbound_services, "_grn_dict", lambda _g, _hb: {"grn_id": str(grn_id)})
 
     # 1. Không có phiếu duyệt mở -> False
     monkeypatch.setattr(
