@@ -1,3 +1,4 @@
+{% if warning_msg %}<div class="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{{ warning_msg }}</div>{% endif %}
 {% if flash_msg %}<div class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{{ flash_msg }}</div>{% endif %}
 {% if api_error %}<div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>[{{ api_error.code }}]</strong> {{ api_error.message }}</div>{% endif %}
 <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -13,7 +14,7 @@
         <td class="px-4 py-3 font-medium text-slate-900">{{ o.erp_order_number }}</td>
         <td class="px-4 py-3 text-slate-600">{{ o.order_type }}</td>
         <td class="px-4 py-3 text-slate-600">{{ o.customer_name or '-' }}</td>
-        <td class="px-4 py-3"><span class="inline-flex rounded-full bg-blue-50 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">{{ o.status }}</span></td>
+        <td class="px-4 py-3"><span class="inline-flex rounded-full bg-blue-50 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">{{ o.status | vi_label }}</span></td>
         <td class="px-4 py-3 text-right space-x-2">
           {% if o.status == 'NEW' and not o.erp_change_pending %}
           <button hx-post="/outbound/orders/{{ o.order_id }}/allocate" hx-vals='{"version_no": {{ o.version_no }}, "strategy": "FEFO"}' hx-target="#outbound-orders-container" hx-swap="innerHTML" class="rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700">Cấp phát FEFO</button>

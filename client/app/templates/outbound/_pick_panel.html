@@ -14,7 +14,7 @@
   {% if flash_msg %}<div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{{ flash_msg }}</div>{% endif %}
   {% if api_error %}<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>[{{ api_error.code }}]</strong> {{ api_error.message }}</div>{% endif %}
   {% if pick_session %}
-  <div class="text-sm text-slate-600">Phiên: <strong>{{ pick_session.display_label or pick_session.pick_session_code or pick_session.session_code }}</strong> | Trạng thái: <strong>{{ pick_session.status }}</strong> | v{{ pick_session.version_no }}</div>
+  <div class="text-sm text-slate-600">Phiên: <strong>{{ pick_session.display_label or pick_session.pick_session_code or pick_session.session_code }}</strong> | Trạng thái: <strong>{{ pick_session.status | vi_label }}</strong> | v{{ pick_session.version_no }}</div>
   <div class="overflow-x-auto">
     <table class="min-w-full divide-y divide-slate-200 text-sm">
       <thead class="bg-slate-50 text-left font-semibold text-slate-600">
@@ -23,9 +23,21 @@
       <tbody class="divide-y divide-slate-100">
         {% for l in pick_session.lines %}
         <tr>
-          <td class="px-3 py-2 font-mono text-xs">{{ l.sku_code or l.line_no or loop.index }}</td>
+          <td class="px-3 py-2 text-xs">
+            <div class="font-mono font-semibold text-slate-800">{{ l.sku_code or l.line_no or loop.index }}</div>
+            {% if l.fefo_summary %}
+              <div class="text-slate-600 mt-0.5">{{ l.fefo_summary }}</div>
+            {% else %}
+              <div class="text-slate-600 mt-0.5">
+                {% if l.source_location_code %}{{ l.source_location_code }}{% endif %}
+                {% if l.lot_code %} · Lô {{ l.lot_code }}{% endif %}
+                {% if l.expiry_display %} · HSD {{ l.expiry_display }}{% endif %}
+                {% if l.sku_name %} · {{ l.sku_name }}{% endif %}
+              </div>
+            {% endif %}
+          </td>
           <td class="px-3 py-2">{{ l.qty_to_pick|qty }}</td>
-          <td class="px-3 py-2">{{ l.status }}</td>
+          <td class="px-3 py-2">{{ l.status|vi_label }}</td>
           <td class="px-3 py-2">
             {% if l.status == 'PENDING' %}
             <form hx-post="/outbound/pick-sessions/{{ pick_session.pick_session_id }}/lines/{{ l.pick_line_id }}/confirm" hx-target="#outbound-pick-container" hx-swap="innerHTML" class="flex flex-wrap items-center gap-1.5">
