@@ -363,7 +363,7 @@ def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None
         db.execute(
             text(
                 """
-                INSERT INTO skus (sku_id, sku_code, name, base_uom, is_active)
+                INSERT INTO skus (sku_id, sku_code, sku_name, base_uom, is_active)
                 VALUES (:sid, :scode, :sname, 'PCS', TRUE);
                 """
             ),
