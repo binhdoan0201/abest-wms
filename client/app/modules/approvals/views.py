@@ -235,8 +235,10 @@ def approval_decide_htmx(
                 json_data={"rejection_reason": note, "version_no": version_no},
             )
             flash_msg = "Đã từ chối hồ sơ phê duyệt."
-        elif action == "request_info":
-            is_recount = request_recount == "true"
+        elif action in ("request_recount", "request_info"):
+            # Nút «Yêu cầu đếm lại» (hồ sơ lệch GRN, kiểm kê) luôn ghi REQUEST_RECOUNT: thiếu cờ này
+            # phân hệ nguồn chặn đếm lại và hồ sơ kẹt ở NEED_INFO.
+            is_recount = action == "request_recount" or request_recount == "true"
             api.post(
                 f"/approvals/{approval_id}/request-info",
                 json_data={
@@ -246,9 +248,7 @@ def approval_decide_htmx(
                 },
             )
             flash_msg = (
-                "Đã gửi yêu cầu đếm lại kiểm kê."
-                if is_recount
-                else "Đã gửi yêu cầu bổ sung thông tin."
+                "Đã gửi yêu cầu đếm lại." if is_recount else "Đã gửi yêu cầu bổ sung thông tin."
             )
         elif action == "escalate":
             payload_esc: dict[str, Any] = {"version_no": version_no}

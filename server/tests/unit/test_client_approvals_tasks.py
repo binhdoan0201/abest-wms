@@ -76,6 +76,31 @@ def test_approvals_htmx_panel_and_decisions(
         "sla_due_at": "2026-11-26T10:00:00Z",
         "locked_by_viewer_id": str(uuid.uuid4()),
         "version_no": 2,
+        "object_ref": "CC-20261125-ABC123 / LOC-A01-01",
+        "source": {
+            "doc_type": "CYCLE_COUNT",
+            "doc_number": "CC-20261125-ABC123",
+            "doc_status": "PENDING_APPROVAL",
+            "recount_count": 0,
+            "parent_doc_number": None,
+            "proposer_name": "Nguyễn Kiểm Kê (nv_kiemke)",
+            "lines": [
+                {
+                    "sku_code": "SKU-ELEC-003",
+                    "sku_name": "Bàn ủi hơi nước",
+                    "uom_code": "PCS",
+                    "lot_number": None,
+                    "location_code": "LOC-A01-01",
+                    "qty_expected": "40.000",
+                    "qty_counted": "37.000",
+                    "qty_damaged": None,
+                    "qty_variance": "-3.000",
+                    "variance_amount": "-1500000.00",
+                    "reason_code": None,
+                    "reason_description": None,
+                }
+            ],
+        },
         "histories": [
             {
                 "tier": "D1_THUKHO",
@@ -111,8 +136,31 @@ def test_approvals_htmx_panel_and_decisions(
         cookies={"abest_session": quanly_cookie},
     )
     assert panel.status_code == 200
-    assert "CYCLE_COUNT_DIFF" in panel.text
+    assert "Chênh lệch kiểm kê" in panel.text
     assert "Mở khóa xem" in panel.text
+    # Bảng lệch của chứng từ nguồn: số phiếu, người đề xuất, sổ sách 40 / đếm 37 / lệch -3
+    assert "CC-20261125-ABC123 / LOC-A01-01" in panel.text
+    assert "Nguyễn Kiểm Kê (nv_kiemke)" in panel.text
+    for text_value in ("Sổ sách", ">40<", ">37<", "-3", "Vị trí LOC-A01-01"):
+        assert text_value in panel.text, text_value
+    assert "26/11/2026 17:00" in panel.text, "SLA theo giờ Việt Nam"
+    # Hồ sơ lệch kiểm kê: nút đếm lại gửi thẳng request_recount, không còn ô tick dễ quên
+    assert 'value="request_recount"' in panel.text
+    assert 'name="request_recount"' not in panel.text
+    assert "1.500.000 ₫" in panel.text
+
+    # Đang NEED_INFO: chỉ còn Từ chối, không còn nút duyệt/đếm lại bấm nhầm
+    sample_detail["status"] = "NEED_INFO"
+    waiting = web.get(
+        f"/approvals/{approval_id}/panel?lock=true",
+        headers={"HX-Request": "true"},
+        cookies={"abest_session": quanly_cookie},
+    )
+    assert "Đang chờ nhân viên khác đếm lại" in waiting.text
+    assert 'value="reject"' in waiting.text
+    assert 'value="approve"' not in waiting.text
+    assert 'value="request_recount"' not in waiting.text
+    sample_detail["status"] = "PENDING_D1"
 
     unlock = web.post(
         f"/approvals/{approval_id}/unlock",
@@ -153,16 +201,19 @@ def test_approvals_htmx_panel_and_decisions(
     recount = web.post(
         f"/approvals/{approval_id}/decide",
         data={
-            "action": "request_info",
+            "action": "request_recount",
             "version_no": "2",
             "reason_or_note": "Đếm lại lô hàng B2",
-            "request_recount": "true",
         },
         headers={"HX-Request": "true", **ORIGIN},
         cookies={"abest_session": quanly_cookie},
     )
     assert recount.status_code == 200
-    assert "Đã gửi yêu cầu đếm lại kiểm kê." in recount.text
+    assert "Đã gửi yêu cầu đếm lại." in recount.text
+    recount_payload = next(
+        c[2] for c in reversed(calls) if c[1] == f"/approvals/{approval_id}/request-info"
+    )
+    assert recount_payload is not None and recount_payload["request_recount"] is True
 
     escalate = web.post(
         f"/approvals/{approval_id}/decide",

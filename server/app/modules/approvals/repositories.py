@@ -235,3 +235,148 @@ def get_latest_approved_by_object(
     if for_update:
         stmt = stmt.with_for_update()
     return db.execute(stmt).scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Chứng từ nguồn của hồ sơ duyệt: người duyệt phải thấy lệch gì trước khi quyết định.
+# Đọc thẳng bảng (không gọi service inbound/cycle_count) để tránh import vòng và để cấp
+# D3 (bgd, không có quyền NH-1/KK-1) vẫn xem được hồ sơ mình duyệt.
+# ---------------------------------------------------------------------------
+
+
+def get_object_refs(db: Session, pairs: list[tuple[str, uuid.UUID]]) -> dict[uuid.UUID, str]:
+    """Số chứng từ hiển thị cho từng hồ sơ: số GRN, hoặc `số phiếu kiểm kê / vị trí`."""
+    grn_ids = [oid for otype, oid in pairs if otype == "GRN_DISCREPANCY"]
+    line_ids = [oid for otype, oid in pairs if otype == "CYCLE_COUNT_DIFF"]
+    refs: dict[uuid.UUID, str] = {}
+    if grn_ids:
+        rows = db.execute(
+            text("SELECT grn_id, grn_number FROM grns WHERE grn_id = ANY(:ids)"),
+            {"ids": grn_ids},
+        ).fetchall()
+        refs.update({r[0]: r[1] for r in rows})
+    if line_ids:
+        rows = db.execute(
+            text(
+                """
+                SELECT cl.count_line_id, cs.sheet_number || ' / ' || l.location_code
+                FROM cycle_count_lines cl
+                JOIN cycle_count_sheets cs ON cs.count_sheet_id = cl.count_sheet_id
+                JOIN locations l ON l.location_id = cl.location_id
+                WHERE cl.count_line_id = ANY(:ids)
+                """
+            ),
+            {"ids": line_ids},
+        ).fetchall()
+        refs.update({r[0]: r[1] for r in rows})
+    return refs
+
+
+def get_user_display_name(db: Session, user_id: uuid.UUID) -> str | None:
+    row = db.execute(
+        text("SELECT full_name, username FROM users WHERE user_id = :uid"), {"uid": user_id}
+    ).first()
+    if row is None:
+        return None
+    return f"{row[0]} ({row[1]})" if row[0] else str(row[1])
+
+
+def get_grn_source(db: Session, grn_id: uuid.UUID) -> dict[str, Any] | None:
+    head = db.execute(
+        text(
+            """
+            SELECT g.grn_number, g.status::text, g.recount_count, po.erp_po_number
+            FROM grns g
+            LEFT JOIN purchase_orders po ON po.po_id = g.po_id
+            WHERE g.grn_id = :gid
+            """
+        ),
+        {"gid": grn_id},
+    ).first()
+    if head is None:
+        return None
+    lines = db.execute(
+        text(
+            """
+            SELECT s.sku_code, s.sku_name, gl.uom_code, lt.lot_number,
+                   gl.qty_expected, gl.qty_actual, gl.qty_damaged, gl.qty_variance,
+                   gl.variance_amount, gl.reason_code, rc.description
+            FROM grn_lines gl
+            JOIN skus s ON s.sku_id = gl.sku_id
+            LEFT JOIN lots lt ON lt.lot_id = gl.lot_id
+            LEFT JOIN reason_codes rc ON rc.reason_code = gl.reason_code
+            WHERE gl.grn_id = :gid
+            ORDER BY s.sku_code
+            """
+        ),
+        {"gid": grn_id},
+    ).fetchall()
+    return {
+        "doc_type": "GRN",
+        "doc_number": head[0],
+        "doc_status": head[1],
+        "recount_count": head[2],
+        "parent_doc_number": head[3],
+        "lines": [
+            {
+                "sku_code": r[0],
+                "sku_name": r[1],
+                "uom_code": r[2],
+                "lot_number": r[3],
+                "location_code": None,
+                "qty_expected": r[4],
+                "qty_counted": r[5],
+                "qty_damaged": r[6],
+                "qty_variance": r[7],
+                "variance_amount": r[8],
+                "reason_code": r[9],
+                "reason_description": r[10],
+            }
+            for r in lines
+        ],
+    }
+
+
+def get_cycle_count_source(db: Session, line_id: uuid.UUID) -> dict[str, Any] | None:
+    r = db.execute(
+        text(
+            """
+            SELECT cs.sheet_number, cs.status::text, cl.recount_count,
+                   s.sku_code, s.sku_name, s.base_uom, lt.lot_number, l.location_code,
+                   cl.system_qty_snapshot, cl.final_counted_qty, cl.variance_qty,
+                   cl.variance_amount, cl.anomaly_type
+            FROM cycle_count_lines cl
+            JOIN cycle_count_sheets cs ON cs.count_sheet_id = cl.count_sheet_id
+            JOIN locations l ON l.location_id = cl.location_id
+            LEFT JOIN skus s ON s.sku_id = cl.sku_id
+            LEFT JOIN lots lt ON lt.lot_id = cl.lot_id
+            WHERE cl.count_line_id = :lid
+            """
+        ),
+        {"lid": line_id},
+    ).first()
+    if r is None:
+        return None
+    return {
+        "doc_type": "CYCLE_COUNT",
+        "doc_number": r[0],
+        "doc_status": r[1],
+        "recount_count": r[2],
+        "parent_doc_number": None,
+        "lines": [
+            {
+                "sku_code": r[3],
+                "sku_name": r[4],
+                "uom_code": r[5],
+                "lot_number": r[6],
+                "location_code": r[7],
+                "qty_expected": r[8],
+                "qty_counted": r[9],
+                "qty_damaged": None,
+                "qty_variance": r[10],
+                "variance_amount": r[11],
+                "reason_code": None if (r[12] or "NONE") == "NONE" else r[12],
+                "reason_description": None,
+            }
+        ],
+    }

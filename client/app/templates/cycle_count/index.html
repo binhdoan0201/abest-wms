@@ -94,9 +94,9 @@
         </div>
         <div class="text-xs text-slate-500">
           SKU: <strong>{{ ln.sku_code or sku_code_map.get(ln.sku_id|string, ln.sku_id) if ln.sku_id else "Vị trí trống" }}</strong> |
-          Tồn sổ sách: <strong>{{ ln.system_qty_snapshot if ln.system_qty_snapshot is not none else "ẨN (Đếm mù)" }}</strong>
+          Tồn sổ sách: <strong>{{ ln.system_qty_snapshot|qty if ln.system_qty_snapshot is not none else "ẨN (Đếm mù)" }}</strong>
           {% if ln.variance_qty is not none %}
-          | Chênh lệch: <strong class="text-rose-600">{{ ln.variance_qty }}</strong>
+          | Chênh lệch: <strong class="text-rose-600">{{ ln.variance_qty|qty }}</strong>
           {% endif %}
         </div>
 

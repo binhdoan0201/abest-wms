@@ -807,15 +807,26 @@ class InboundService:
                 ln.pallet_id = good_pallet_id
             if ln.qty_damaged > 0 and ln.damaged_pallet_id is None:
                 if dmg_pallet_id is None:
-                    dmg_pallet_id = InboundRepository.create_pallet(
-                        db,
-                        f"{grn.grn_number}-DMG",
-                        grn.warehouse_id,
-                        dock_loc,
-                        grn.grn_id,
-                        "DAMAGED_HOLD",
-                        actor_id,
-                    )
+                    dmg_code = f"{grn.grn_number}-DMG"
+                    existing_dmg_id = InboundRepository.get_pallet_by_code(db, dmg_code)
+                    if existing_dmg_id is not None:
+                        dmg_pallet_id = InboundRepository.reactivate_pallet_for_grn(
+                            db,
+                            existing_dmg_id,
+                            dock_loc,
+                            grn.grn_id,
+                            "DAMAGED_HOLD",
+                        )
+                    else:
+                        dmg_pallet_id = InboundRepository.create_pallet(
+                            db,
+                            dmg_code,
+                            grn.warehouse_id,
+                            dock_loc,
+                            grn.grn_id,
+                            "DAMAGED_HOLD",
+                            actor_id,
+                        )
                 ln.damaged_pallet_id = dmg_pallet_id
 
         db.flush()
@@ -1098,15 +1109,26 @@ class InboundService:
             if ln.qty_damaged > 0:
                 if ln.damaged_pallet_id is None:
                     if dmg_pallet_id is None:
-                        dmg_pallet_id = InboundRepository.create_pallet(
-                            db,
-                            f"{grn.grn_number}-DMG",
-                            warehouse_id,
-                            dock_loc,
-                            grn.grn_id,
-                            "DAMAGED_HOLD",
-                            user.user_id,
-                        )
+                        dmg_code = f"{grn.grn_number}-DMG"
+                        existing_dmg_id = InboundRepository.get_pallet_by_code(db, dmg_code)
+                        if existing_dmg_id is not None:
+                            dmg_pallet_id = InboundRepository.reactivate_pallet_for_grn(
+                                db,
+                                existing_dmg_id,
+                                dock_loc,
+                                grn.grn_id,
+                                "DAMAGED_HOLD",
+                            )
+                        else:
+                            dmg_pallet_id = InboundRepository.create_pallet(
+                                db,
+                                dmg_code,
+                                warehouse_id,
+                                dock_loc,
+                                grn.grn_id,
+                                "DAMAGED_HOLD",
+                                user.user_id,
+                            )
                     ln.damaged_pallet_id = dmg_pallet_id
                 apply_movement(
                     db=db,

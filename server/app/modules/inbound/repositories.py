@@ -330,6 +330,48 @@ class InboundRepository:
         return int(ver or 1)
 
     @staticmethod
+    def get_pallet_by_code(db: Session, pallet_code: str) -> uuid.UUID | None:
+        pid = db.scalar(
+            text(
+                """
+                SELECT pallet_id
+                FROM pallets
+                WHERE pallet_code = :pcode;
+                """
+            ),
+            {"pcode": pallet_code},
+        )
+        return pid
+
+    @staticmethod
+    def reactivate_pallet_for_grn(
+        db: Session,
+        pallet_id: uuid.UUID,
+        location_id: uuid.UUID | None,
+        source_grn_id: uuid.UUID,
+        status: str,
+    ) -> uuid.UUID:
+        db.execute(
+            text(
+                """
+                UPDATE pallets
+                SET status = CAST(:st AS pallet_status_type),
+                    current_location_id = :loc,
+                    source_grn_id = :grn,
+                    version_no = version_no + 1
+                WHERE pallet_id = :pid;
+                """
+            ),
+            {
+                "pid": pallet_id,
+                "st": status,
+                "loc": location_id,
+                "grn": source_grn_id,
+            },
+        )
+        return pallet_id
+
+    @staticmethod
     def cleanup_empty_damaged_pallets(db: Session, grn_id: uuid.UUID) -> None:
         rows = db.execute(
             text(
@@ -357,7 +399,6 @@ class InboundRepository:
                     """
                     UPDATE pallets
                     SET status = CAST('EMPTY' AS pallet_status_type),
-                        source_grn_id = NULL,
                         version_no = version_no + 1
                     WHERE pallet_id = :pid;
                     """
@@ -484,7 +525,11 @@ class InboundRepository:
                   AND z.is_active = TRUE
                   AND l.status IN ('EMPTY', 'PARTIAL')
                   AND (:excl_loc IS NULL OR l.location_id <> :excl_loc)
-                ORDER BY has_same_sku DESC, has_other_sku ASC, l.current_capacity_pct DESC, l.location_code ASC
+                ORDER BY
+                    has_same_sku DESC,
+                    has_other_sku ASC,
+                    l.current_capacity_pct DESC,
+                    l.location_code ASC
                 LIMIT 5;
                 """
             ),

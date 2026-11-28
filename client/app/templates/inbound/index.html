@@ -127,7 +127,7 @@
         <select id="grn_sku_select" name="sku_id" required onchange="syncSkuDefaults()" class="w-full rounded border-slate-300 text-sm">
           {% for opt in sku_options %}
           <option value="{{ opt.sku_id }}" data-uom="{{ opt.uom_code }}" data-expected="{{ opt.qty_expected if opt.qty_expected is not none else '' }}">
-            {{ opt.sku_code }}{% if opt.sku_name %} – {{ opt.sku_name }}{% endif %}{% if opt.qty_expected is not none %} (PO: {{ opt.qty_expected }}){% endif %}
+            {{ opt.sku_code }}{% if opt.sku_name %} – {{ opt.sku_name }}{% endif %}{% if opt.qty_expected is not none %} (PO: {{ opt.qty_expected|qty }}){% endif %}
           </option>
           {% endfor %}
         </select>
@@ -239,9 +239,9 @@
         <tr>
           <td class="py-2 px-3 font-medium text-slate-800">{{ ln.sku_code or sku_code_map.get(ln.sku_id|string, ln.sku_id) }}</td>
           <td class="py-2 px-3">{{ ln.uom_code }}</td>
-          <td class="py-2 px-3">{{ ln.qty_expected if ln.qty_expected is not none else "(Đếm mù)" }}</td>
-          <td class="py-2 px-3 font-semibold">{{ ln.qty_actual }}</td>
-          <td class="py-2 px-3 text-rose-600">{{ ln.qty_damaged }}</td>
+          <td class="py-2 px-3">{{ ln.qty_expected|qty if ln.qty_expected is not none else "(Đếm mù)" }}</td>
+          <td class="py-2 px-3 font-semibold">{{ ln.qty_actual|qty }}</td>
+          <td class="py-2 px-3 text-rose-600">{{ ln.qty_damaged|qty }}</td>
           <td class="py-2 px-3">{{ "Có" if ln.is_quarantined else "Không" }}</td>
         </tr>
         {% endfor %}
