@@ -395,16 +395,15 @@ def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None
         )
         by_id = {uuid.UUID(s["location_id"]): s for s in suggestions}
         assert loc_same_id in by_id
-        assert by_id[loc_same_id]["has_same_sku"] is True
-        assert by_id[loc_same_id]["has_other_sku"] is False
+        assert by_id[loc_same_id]["same_sku_consolidation"] is True
 
         order = [uuid.UUID(s["location_id"]) for s in suggestions]
         if loc_empty_id in by_id:
-            assert by_id[loc_empty_id]["has_same_sku"] is False
-            assert by_id[loc_empty_id]["has_other_sku"] is False
+            assert by_id[loc_empty_id]["same_sku_consolidation"] is False
+            assert by_id[loc_empty_id]["status"] == "EMPTY"
             assert order.index(loc_same_id) < order.index(loc_empty_id)
         if loc_other_id in by_id:
-            assert by_id[loc_other_id]["has_other_sku"] is True
+            assert by_id[loc_other_id]["same_sku_consolidation"] is False
             assert order.index(loc_same_id) < order.index(loc_other_id)
             if loc_empty_id in by_id:
                 assert order.index(loc_empty_id) < order.index(loc_other_id)
