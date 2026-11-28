@@ -1,0 +1,50 @@
+<div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+  <h2 class="font-semibold text-slate-800 text-sm">Danh sách hồ sơ ({{ meta.total if meta and meta.total is not none else items|length }})</h2>
+</div>
+<div class="overflow-x-auto">
+  <table class="min-w-full divide-y divide-slate-200 text-sm">
+    <thead class="bg-slate-50 text-slate-600 text-xs uppercase">
+      <tr>
+        <th class="px-3 py-2.5 text-left">Loại / Mã đối tượng</th>
+        <th class="px-3 py-2.5 text-left">Cấp / Trạng thái</th>
+        <th class="px-3 py-2.5 text-right">Giá trị lệch</th>
+        <th class="px-3 py-2.5 text-right">Thao tác</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for item in items %}
+      <tr class="hover:bg-slate-50">
+        <td class="px-3 py-3">
+          <div class="font-semibold text-slate-800">{{ item.object_type|vi_label }}</div>
+          <div class="text-xs text-slate-600 font-mono">{{ item.object_ref or item.object_id }}</div>
+          <div class="text-[11px] text-slate-400">v{{ item.version_no }}{% if item.sla_due_at %} &bull; Hạn {{ item.sla_due_at|vn_datetime }}{% endif %}</div>
+        </td>
+        <td class="px-3 py-3">
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-800">{{ item.current_tier|vi_label }}</span>
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold {% if item.status == 'APPROVED' %}bg-emerald-100 text-emerald-800{% elif item.status == 'REJECTED' %}bg-rose-100 text-rose-800{% elif item.status == 'NEED_INFO' %}bg-amber-100 text-amber-800{% elif item.status == 'SUPERSEDED' %}bg-slate-100 text-slate-500{% else %}bg-blue-100 text-blue-800{% endif %}">{{ item.status|vi_label }}</span>
+          {% if item.locked_by_viewer_id %}
+          <div class="text-[11px] text-amber-700 mt-1">🔒 Đang có người xem</div>
+          {% endif %}
+        </td>
+        <td class="px-3 py-3 text-right font-mono font-semibold text-slate-800">
+          {{ item.discrepancy_value_amount|vnd }}
+        </td>
+        <td class="px-3 py-3 text-right">
+          <button type="button"
+                  hx-get="/approvals/{{ item.approval_id }}/panel?lock=true"
+                  hx-target="#approval-detail-panel"
+                  hx-swap="innerHTML"
+                  class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900">
+            Xem &amp; Xử lý
+          </button>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="px-4 py-8 text-center text-slate-400">Không có hồ sơ phê duyệt nào phù hợp bộ lọc.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+div>

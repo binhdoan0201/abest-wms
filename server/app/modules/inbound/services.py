@@ -1171,6 +1171,7 @@ class InboundService:
                     ref_doc_id=pid,
                     priority="NORMAL",
                 ),
+                auto_assign=True,
             )
 
         grn.status = "CLOSED"
