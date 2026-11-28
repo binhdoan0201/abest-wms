@@ -980,7 +980,12 @@ class InboundService:
             )
 
         open_app = InboundRepository.get_open_approval_for_grn(db, grn_id)
-        assert open_app is not None
+        if open_app is None:
+            raise BusinessError(
+                code="APPROVAL_NOT_FOUND",
+                message="Không tìm thấy hồ sơ phê duyệt đang mở cho phiếu nhập kho",
+                http_status=409,
+            )
         grn.recount_count += 1
         supersede_approval_for_recount(
             db=db,

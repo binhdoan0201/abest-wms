@@ -640,3 +640,126 @@ def test_list_grns_can_recount_false_then_true_after_request_recount() -> None:
         db.execute(text("DELETE FROM purchase_orders WHERE po_id = :pid;"), {"pid": po_id})
         db.commit()
         db.close()
+
+
+def test_list_grns_can_recount_false_when_need_info_without_request_recount() -> None:
+    """Hồ sơ NEED_INFO nhưng không có REQUEST_RECOUNT thì can_recount vẫn là False."""
+    nhan_token = _login("nv_nhan")
+    thukho_token = _login("thukho")
+    nhan_hdr = {"Authorization": f"Bearer {nhan_token}"}
+    thukho_hdr = {"Authorization": f"Bearer {thukho_token}"}
+
+    db = SessionLocal()
+    try:
+        supplier_id = db.execute(text("SELECT supplier_id FROM suppliers LIMIT 1;")).scalar_one()
+        sku_id = SKU_ID
+        reason_code = db.execute(
+            text("SELECT reason_code FROM reason_codes WHERE is_active = TRUE LIMIT 1;")
+        ).scalar_one()
+    finally:
+        db.close()
+
+    po_id = uuid.uuid4()
+    po_line_id = uuid.uuid4()
+    erp_po = f"PO-NI-{uuid.uuid4().hex[:8].upper()}"
+    grn_id: uuid.UUID | None = None
+    approval_id: uuid.UUID | None = None
+
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO purchase_orders (
+                    po_id, erp_po_number, warehouse_id, supplier_id, status, expected_date
+                )
+                VALUES (:pid, :erp, :wh, :sup, 'PENDING', CURRENT_DATE);
+                """
+            ),
+            {"pid": po_id, "erp": erp_po, "wh": WAREHOUSE_ID, "sup": supplier_id},
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO po_lines (po_line_id, po_id, line_number, sku_id, uom_code, qty_ordered)
+                VALUES (:lid, :pid, 1, :sku, 'PCS', 10.000);
+                """
+            ),
+            {"lid": po_line_id, "pid": po_id, "sku": sku_id},
+        )
+        db.commit()
+
+        r_create = client.post("/api/v1/grns", headers=nhan_hdr, json={"po_id": str(po_id)})
+        assert r_create.status_code == 201, r_create.text
+        grn_data = r_create.json()["data"]
+        grn_id = uuid.UUID(grn_data["grn_id"])
+
+        r_line = client.post(
+            f"/api/v1/grns/{grn_id}/lines",
+            headers=nhan_hdr,
+            json={
+                "sku_id": str(sku_id),
+                "uom_code": "PCS",
+                "qty_actual": "7",
+                "qty_damaged": "0",
+                "reason_code": reason_code,
+                "version_no": grn_data["version_no"],
+            },
+        )
+        assert r_line.status_code == 201, r_line.text
+
+        grn_after_line = client.get(f"/api/v1/grns/{grn_id}", headers=nhan_hdr).json()["data"]
+        r_submit = client.post(
+            f"/api/v1/grns/{grn_id}/submit",
+            headers=nhan_hdr,
+            json={"version_no": grn_after_line["version_no"]},
+        )
+        assert r_submit.status_code == 200, r_submit.text
+        approval_id = uuid.UUID(r_submit.json()["data"]["approval_id"])
+
+        r_app_get = client.get(f"/api/v1/approvals/{approval_id}", headers=thukho_hdr)
+        assert r_app_get.status_code == 200, r_app_get.text
+        app_ver = int(r_app_get.json()["data"].get("version_no", 1))
+
+        r_info = client.post(
+            f"/api/v1/approvals/{approval_id}/request-info",
+            headers=thukho_hdr,
+            json={
+                "info_required_note": "Bổ sung biên bản giao nhận",
+                "request_recount": False,
+                "version_no": app_ver,
+            },
+        )
+        assert r_info.status_code == 200, r_info.text
+
+        r_list = client.get(f"/api/v1/grns?po_id={po_id}", headers=nhan_hdr)
+        assert r_list.status_code == 200, r_list.text
+        items = r_list.json()["data"]
+        target = next(x for x in items if x["grn_id"] == str(grn_id))
+        assert target["can_recount"] is False
+    finally:
+        db.rollback()
+        if approval_id is not None:
+            db.execute(
+                text("DELETE FROM approval_histories WHERE approval_id = :aid;"),
+                {"aid": approval_id},
+            )
+            db.execute(
+                text("DELETE FROM approval_requests WHERE approval_id = :aid;"),
+                {"aid": approval_id},
+            )
+        if grn_id is not None:
+            db.execute(
+                text(
+                    "DELETE FROM grn_count_attempts "
+                    "WHERE grn_line_id IN (SELECT grn_line_id FROM grn_lines WHERE grn_id = :gid);"
+                ),
+                {"gid": grn_id},
+            )
+            db.execute(text("DELETE FROM grn_lines WHERE grn_id = :gid;"), {"gid": grn_id})
+            db.execute(text("DELETE FROM pallets WHERE source_grn_id = :gid;"), {"gid": grn_id})
+            db.execute(text("DELETE FROM grns WHERE grn_id = :gid;"), {"gid": grn_id})
+        db.execute(text("DELETE FROM po_lines WHERE po_line_id = :lid;"), {"lid": po_line_id})
+        db.execute(text("DELETE FROM purchase_orders WHERE po_id = :pid;"), {"pid": po_id})
+        db.commit()
+        db.close()
