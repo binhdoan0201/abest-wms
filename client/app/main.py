@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from client.app.core.api_client import ClientApiError
 from client.app.core.auth_guard import NeedAuthException, get_optional_user, home_path
 from client.app.core.config import get_client_settings
+from client.app.core.formatting import register_filters
 from client.app.core.middleware import CompactCsrfMiddleware, SessionRefreshMiddleware
 from client.app.modules.approvals import router as approvals_router
 from client.app.modules.auth import router as auth_router
@@ -39,6 +40,7 @@ def create_client_app() -> FastAPI:
 
     # 1. Cấu hình Jinja2 Templates & Static Files
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    register_filters(templates)
     app.state.templates = templates
 
     if STATIC_DIR.exists():

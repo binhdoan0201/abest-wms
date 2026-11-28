@@ -455,6 +455,24 @@ def get_approval_detail(
     return approval, histories
 
 
+def get_object_refs(db: Session, approvals: list[ApprovalRequest]) -> dict[uuid.UUID, str]:
+    """Số chứng từ nguồn (số GRN, `số phiếu kiểm kê / vị trí`) cho danh sách hồ sơ."""
+    return repo.get_object_refs(db, [(str(a.object_type), a.object_id) for a in approvals])
+
+
+def get_approval_source(db: Session, approval: ApprovalRequest) -> dict[str, Any] | None:
+    """Tóm tắt chứng từ nguồn để người duyệt thấy lệch gì; `None` với loại hồ sơ chưa hỗ trợ."""
+    object_type = str(approval.object_type)
+    source: dict[str, Any] | None = None
+    if object_type == "GRN_DISCREPANCY":
+        source = repo.get_grn_source(db, approval.object_id)
+    elif object_type == "CYCLE_COUNT_DIFF":
+        source = repo.get_cycle_count_source(db, approval.object_id)
+    if source is not None:
+        source["proposer_name"] = repo.get_user_display_name(db, approval.proposer_user_id)
+    return source
+
+
 def unlock_approval(
     db: Session,
     user_ctx: UserContext,

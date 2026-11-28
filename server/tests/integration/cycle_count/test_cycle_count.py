@@ -192,7 +192,23 @@ def test_cycle_count_diff_approval_marks_executed_on_close() -> None:
             headers={"Authorization": f"Bearer {thukho_token}"},
         )
         assert r_app_detail.status_code == 200
-        app_ver = r_app_detail.json()["data"]["version_no"]
+        app_detail = r_app_detail.json()["data"]
+        app_ver = app_detail["version_no"]
+        # Người duyệt thấy chứng từ nguồn: phiếu, vị trí, sổ sách 10, đếm 7, lệch -3
+        source = app_detail["source"]
+        assert source["doc_type"] == "CYCLE_COUNT"
+        assert source["doc_number"] == sheet["sheet_number"]
+        src_line = source["lines"][0]
+        loc_code = db.execute(
+            text("SELECT location_code FROM locations WHERE location_id = :l"), {"l": loc_id}
+        ).scalar_one()
+        assert src_line["location_code"] == loc_code
+        assert app_detail["object_ref"] == f"{sheet['sheet_number']} / {loc_code}"
+        assert (
+            Decimal(src_line["qty_expected"]),
+            Decimal(src_line["qty_counted"]),
+            Decimal(src_line["qty_variance"]),
+        ) == (Decimal("10"), Decimal("7"), Decimal("-3"))
 
         r_approve = client.post(
             f"/api/v1/approvals/{approval_id}/approve",

@@ -18,11 +18,19 @@
 
 ### 1. GET /api/v1/approvals
 - **Mục đích:** Xem danh sách hàng chờ duyệt chênh lệch (`?status=&tier=&object_type=&expired=true&page=1&page_size=20`).
+- **Trả thêm:** `object_ref` – số chứng từ nguồn để hiển thị: số GRN (`GRN_DISCREPANCY`) hoặc `số phiếu kiểm kê / vị trí` (`CYCLE_COUNT_DIFF`); loại khác là `null`.
 - **Vai trò:** `thukho` (D1), `quanly` (D2), `bgd` (D3).
 - **Lỗi:** FORBIDDEN 403.
 
 ### 2. GET /api/v1/approvals/{approval_id}
 - **Mục đích:** Xem chi tiết hồ sơ chênh lệch và lịch sử các lần duyệt/chuyển tiếp. Khi `?lock=true` (mặc định) và người xem đúng tầng đang chờ duyệt, hệ thống tự động đặt khóa trong 15 phút (`locked_by_viewer_id`, `locked_at`) để tránh 2 người mở xử lý trùng phiếu.
+- **Trả thêm:** `object_ref` như danh sách, và `source` – tóm tắt chứng từ nguồn để người duyệt thấy lệch gì trước khi quyết định
+  (`null` với loại hồ sơ chưa hỗ trợ):
+  `doc_type` (`GRN` | `CYCLE_COUNT`), `doc_number`, `doc_status`, `recount_count`, `parent_doc_number` (GRN: số PO ERP),
+  `proposer_name`, `lines[]` gồm `sku_code`, `sku_name`, `uom_code`, `lot_number`, `location_code`,
+  `qty_expected` (GRN: SL chứng từ; kiểm kê: tồn sổ sách lúc khóa vị trí), `qty_counted`, `qty_damaged`, `qty_variance`,
+  `variance_amount`, `reason_code`, `reason_description`. Đọc thẳng từ bảng nguồn nên cấp D3 (`bgd`, không có `NH-1`/`KK-1`)
+  vẫn xem được hồ sơ mình duyệt.
 - **Vai trò:** `thukho`, `quanly`, `bgd`.
 - **Lỗi:** NOT_FOUND 404, FORBIDDEN 403, APPROVAL_LOCKED_BY_OTHER 409.
 

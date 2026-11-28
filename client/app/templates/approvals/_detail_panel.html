@@ -12,11 +12,17 @@
   {% endif %}
 
   {% if detail %}
+  {% set src = detail.source %}
   <div class="flex items-start justify-between gap-2 border-b border-slate-200 pb-3">
     <div>
-      <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">Hồ sơ {{ detail.current_tier }} &bull; v{{ detail.version_no }}</span>
-      <h3 class="text-base font-bold text-slate-800 mt-0.5">{{ detail.object_type }}</h3>
-      <p class="text-xs font-mono text-slate-500 break-all">ID: {{ detail.approval_id }}</p>
+      <span class="text-xs font-bold uppercase tracking-wider text-indigo-600">{{ detail.current_tier|vi_label }} &bull; v{{ detail.version_no }}</span>
+      <h3 class="text-base font-bold text-slate-800 mt-0.5">{{ detail.object_type|vi_label }}</h3>
+      <p class="text-sm font-mono font-semibold text-slate-700">{{ detail.object_ref or detail.object_id }}</p>
+      {% if src %}
+      <p class="text-xs text-slate-500 mt-0.5">
+        {% if src.parent_doc_number %}PO {{ src.parent_doc_number }} &bull; {% endif %}Người đề xuất: {{ src.proposer_name or '–' }}{% if src.recount_count %} &bull; Đã đếm lại {{ src.recount_count }} lần{% endif %}
+      </p>
+      {% endif %}
     </div>
     {% if detail.locked_by_viewer_id %}
     <form hx-post="/approvals/{{ detail.approval_id }}/unlock" hx-target="#approval-detail-panel" hx-swap="innerHTML">
@@ -27,26 +33,83 @@
     {% endif %}
   </div>
 
+  {% if src and src.lines %}
+  {% set is_count = src.doc_type == 'CYCLE_COUNT' %}
+  <div class="rounded-xl border border-slate-200 overflow-x-auto">
+    <table class="min-w-full text-xs">
+      <thead class="bg-slate-50 text-slate-500 uppercase text-[10px]">
+        <tr>
+          <th class="px-2.5 py-2 text-left">SKU</th>
+          <th class="px-2.5 py-2 text-right">{{ 'Sổ sách' if is_count else 'Chứng từ' }}</th>
+          <th class="px-2.5 py-2 text-right">Đếm được</th>
+          {% if not is_count %}<th class="px-2.5 py-2 text-right">Hư</th>{% endif %}
+          <th class="px-2.5 py-2 text-right">Lệch</th>
+          <th class="px-2.5 py-2 text-right">Giá trị</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for ln in src.lines %}
+        <tr>
+          <td class="px-2.5 py-2">
+            <div class="font-mono font-semibold text-slate-800">{{ ln.sku_code or '–' }}</div>
+            <div class="text-[11px] text-slate-500">{{ ln.sku_name or '' }}</div>
+            <div class="text-[11px] text-slate-400">
+              {% if ln.location_code %}Vị trí {{ ln.location_code }}{% endif %}{% if ln.lot_number %}{% if ln.location_code %} &bull; {% endif %}Lô {{ ln.lot_number }}{% endif %}
+            </div>
+            {% if ln.reason_code %}<div class="text-[11px] text-amber-700">Lý do: {{ ln.reason_description or ln.reason_code }}</div>{% endif %}
+          </td>
+          <td class="px-2.5 py-2 text-right font-mono">{{ ln.qty_expected|qty if ln.qty_expected is not none else '–' }}</td>
+          <td class="px-2.5 py-2 text-right font-mono font-semibold">{{ ln.qty_counted|qty if ln.qty_counted is not none else '–' }}</td>
+          {% if not is_count %}<td class="px-2.5 py-2 text-right font-mono text-rose-600">{{ ln.qty_damaged|qty if ln.qty_damaged is not none else '–' }}</td>{% endif %}
+          {% set var = (ln.qty_variance|float) if ln.qty_variance is not none else 0 %}
+          <td class="px-2.5 py-2 text-right font-mono font-bold {{ 'text-rose-600' if var < 0 else ('text-amber-600' if var > 0 else 'text-slate-500') }}">
+            {% if ln.qty_variance is none %}–{% else %}{{ '+' if var > 0 else '' }}{{ ln.qty_variance|qty }}{% endif %} <span class="font-normal text-slate-400">{{ ln.uom_code or '' }}</span>
+          </td>
+          <td class="px-2.5 py-2 text-right font-mono">{{ ln.variance_amount|vnd if ln.variance_amount is not none else '–' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <dl class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-xl">
     <div>
       <dt class="text-slate-500">Trạng thái duyệt</dt>
-      <dd class="font-bold text-slate-800">{{ detail.status }}</dd>
+      <dd class="font-bold text-slate-800">{{ detail.status|vi_label }}</dd>
     </div>
     <div>
       <dt class="text-slate-500">Trạng thái thực thi</dt>
-      <dd class="font-bold text-slate-800">{{ detail.execution_status }}</dd>
+      <dd class="font-bold text-slate-800">{{ detail.execution_status|vi_label }}</dd>
     </div>
     <div>
       <dt class="text-slate-500">Giá trị chênh lệch</dt>
-      <dd class="font-mono font-bold text-rose-700">{{ detail.discrepancy_value_amount }}</dd>
+      <dd class="font-mono font-bold text-rose-700">{{ detail.discrepancy_value_amount|vnd }}</dd>
     </div>
     <div>
-      <dt class="text-slate-500">Hạn SLA</dt>
-      <dd class="font-medium text-slate-800">{{ detail.sla_due_at or 'Không giới hạn' }}</dd>
+      <dt class="text-slate-500">Hạn xử lý (SLA)</dt>
+      <dd class="font-medium text-slate-800">{{ detail.sla_due_at|vn_datetime if detail.sla_due_at else 'Không giới hạn' }}</dd>
     </div>
   </dl>
 
-  {% if detail.status in ['PENDING_D1', 'PENDING_D2', 'PENDING_D3', 'NEED_INFO'] %}
+  {% set recount_types = ['GRN_DISCREPANCY', 'CYCLE_COUNT_DIFF'] %}
+  {% if detail.status == 'NEED_INFO' %}
+  <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+    {% if detail.object_type in recount_types %}
+    Đang chờ nhân viên khác đếm lại. Kết quả đếm lại sẽ tạo hồ sơ duyệt mới thay cho hồ sơ này.
+    {% else %}
+    Đang chờ bổ sung thông tin từ người đề xuất.
+    {% endif %}
+  </div>
+  <form hx-post="/approvals/{{ detail.approval_id }}/decide" hx-target="#approval-detail-panel" hx-swap="innerHTML" class="space-y-2 border-t border-slate-200 pt-3">
+    <input type="hidden" name="version_no" value="{{ detail.version_no }}">
+    <label class="block text-xs font-semibold text-slate-700">Lý do từ chối (nếu hủy hồ sơ)</label>
+    <textarea name="reason_or_note" rows="2" placeholder="Nhập lý do từ chối..." class="w-full rounded-lg border border-slate-300 p-2 text-xs"></textarea>
+    <button type="submit" name="action" value="reject" class="w-full rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700">
+      ✕ Từ chối
+    </button>
+  </form>
+  {% elif detail.status in ['PENDING_D1', 'PENDING_D2', 'PENDING_D3'] %}
   <form hx-post="/approvals/{{ detail.approval_id }}/decide" hx-target="#approval-detail-panel" hx-swap="innerHTML" class="space-y-3 border-t border-slate-200 pt-3">
     <input type="hidden" name="version_no" value="{{ detail.version_no }}">
 
@@ -69,11 +132,6 @@
       </div>
     </div>
 
-    <label class="flex items-center gap-2 text-xs text-slate-700">
-      <input type="checkbox" name="request_recount" value="true" class="rounded border-slate-300">
-      <span>Yêu cầu nhân viên kiểm kê đếm lại (khi chọn Yêu cầu bổ sung / đếm lại)</span>
-    </label>
-
     <div class="grid grid-cols-2 gap-2 pt-1">
       <button type="submit" name="action" value="approve" class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">
         ✓ Phê duyệt
@@ -81,9 +139,15 @@
       <button type="submit" name="action" value="reject" class="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700">
         ✕ Từ chối
       </button>
-      <button type="submit" name="action" value="request_info" class="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">
-        ↻ Yêu cầu đếm lại / Bổ sung
+      {% if detail.object_type in recount_types %}
+      <button type="submit" name="action" value="request_recount" class="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">
+        ↻ Yêu cầu đếm lại
       </button>
+      {% else %}
+      <button type="submit" name="action" value="request_info" class="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">
+        ↻ Yêu cầu bổ sung
+      </button>
+      {% endif %}
       {% if detail.current_tier == 'D1_THUKHO' %}
       <button type="submit" name="action" value="escalate" class="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700">
         ↑ Chuyển cấp D2
@@ -99,8 +163,8 @@
       {% for h in detail.histories %}
       <div class="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs">
         <div class="flex justify-between font-semibold text-slate-700">
-          <span>[{{ h.tier }}] {{ h.action }}</span>
-          <span class="text-[11px] text-slate-400">{{ h.created_at }}</span>
+          <span>{{ h.action|vi_label }} <span class="font-normal text-slate-400">({{ h.tier|vi_label }})</span></span>
+          <span class="text-[11px] text-slate-400">{{ h.created_at|vn_datetime }}</span>
         </div>
         {% if h.recommendation_or_reason %}
         <p class="text-slate-600 mt-1">{{ h.recommendation_or_reason }}</p>

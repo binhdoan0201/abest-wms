@@ -17,6 +17,7 @@ của các chứng từ đã tạo. Tài khoản `nv_nhan2` tạo bằng `script
 
 import uuid
 from collections.abc import Iterator
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -181,8 +182,21 @@ def test_demo_flow_erp_inbound_approval_putaway_outbound_erp() -> None:
         == 409
     ), "chưa duyệt thì chưa nhập tồn"
 
-    # 3. thukho yêu cầu đếm lại → nv_nhan2 đếm lại đủ 10
-    version = _ok(client.get(f"/api/v1/approvals/{first_approval}", headers=thukho))["version_no"]
+    # 3. thukho mở hồ sơ: thấy số GRN và bảng lệch (chứng từ 10, đếm 8, hư 1) → yêu cầu đếm lại
+    approval = _ok(client.get(f"/api/v1/approvals/{first_approval}", headers=thukho))
+    assert approval["object_ref"] == grn["grn_number"]
+    src_line = approval["source"]["lines"][0]
+    assert approval["source"]["doc_number"] == grn["grn_number"]
+    assert approval["source"]["parent_doc_number"] == f"E2E-PO-{_marker}"
+    assert (
+        Decimal(src_line["qty_expected"]),
+        Decimal(src_line["qty_counted"]),
+        Decimal(src_line["qty_damaged"]),
+    ) == (Decimal(QTY), Decimal("8"), Decimal("1"))
+    assert src_line["sku_code"] == SKU_CODE and src_line["reason_code"] == reason
+    queue = _ok(client.get("/api/v1/approvals", headers=thukho))
+    assert any(a["object_ref"] == grn["grn_number"] for a in queue)
+    version = approval["version_no"]
     _ok(
         client.post(
             f"/api/v1/approvals/{first_approval}/request-info",

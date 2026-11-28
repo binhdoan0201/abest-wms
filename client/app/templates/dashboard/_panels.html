@@ -114,7 +114,7 @@
         {% if inv %}
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {{ card("SKU đang có tồn", inv.skus_in_stock, hint=inv.pallets_in_stock ~ " pallet") }}
-            {{ card("Tồn khả dụng", inv.quantities.available, hint="Hư hỏng " ~ inv.quantities.damaged) }}
+            {{ card("Tồn khả dụng", inv.quantities.available|qty, hint="Hư hỏng " ~ inv.quantities.damaged|qty) }}
             {{ card("Lấp đầy vị trí", pct(inv.locations.occupancy_rate), hint=inv.locations.occupied ~ "/" ~ inv.locations.total ~ " vị trí, khóa " ~ inv.locations.locked) }}
             {{ card("Lô hết hạn / sắp hết", inv.expired_lots ~ " / " ~ inv.near_expiry_lots, "red" if inv.expired_lots else ("amber" if inv.near_expiry_lots else "slate"), hint="Trong " ~ inv.near_expiry_days ~ " ngày tới") }}
         </div>
@@ -133,7 +133,7 @@
                             <td class="px-3 py-2 font-mono">{{ lot.lot_number }}</td>
                             <td class="px-3 py-2">{{ lot.expiry_date }}</td>
                             <td class="px-3 py-2 text-right font-mono font-bold {% if lot.days_left < 0 %}text-rose-600{% else %}text-amber-600{% endif %}">{{ lot.days_left }}</td>
-                            <td class="px-3 py-2 text-right font-mono">{{ lot.qty_on_hand }}</td>
+                            <td class="px-3 py-2 text-right font-mono">{{ lot.qty_on_hand|qty }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -152,8 +152,8 @@
                         <tr>
                             <td class="px-3 py-2 font-mono">{{ s.sku_code }}</td>
                             <td class="px-3 py-2">{{ s.sku_name }}</td>
-                            <td class="px-3 py-2 text-right font-mono font-bold text-amber-600">{{ s.qty_available }}</td>
-                            <td class="px-3 py-2 text-right font-mono">{{ s.min_stock_level }}</td>
+                            <td class="px-3 py-2 text-right font-mono font-bold text-amber-600">{{ s.qty_available|qty }}</td>
+                            <td class="px-3 py-2 text-right font-mono">{{ s.min_stock_level|qty }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>

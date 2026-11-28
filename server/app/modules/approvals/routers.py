@@ -12,6 +12,7 @@ from server.app.modules.approvals.schemas import (
     ApprovalDetailResponse,
     ApprovalHistoryItem,
     ApprovalResponse,
+    ApprovalSource,
     ApproveDecisionRequest,
     EscalateExpiredResponse,
     EscalateTierRequest,
@@ -77,8 +78,14 @@ def list_approvals(
         page=page,
         page_size=page_size,
     )
+    refs = services.get_object_refs(db, items)
+    data = []
+    for item in items:
+        resp = _to_approval_response(item)
+        resp.object_ref = refs.get(item.object_id)
+        data.append(resp.model_dump(mode="json"))
     return {
-        "data": [_to_approval_response(i).model_dump(mode="json") for i in items],
+        "data": data,
         "meta": {
             "page": page,
             "page_size": page_size,
@@ -101,9 +108,13 @@ def get_approval_detail(
         acquire_lock=lock,
     )
     db.commit()
+    source = services.get_approval_source(db, approval)
+    base = _to_approval_response(approval).model_dump()
+    base["object_ref"] = services.get_object_refs(db, [approval]).get(approval.object_id)
     detail = ApprovalDetailResponse(
-        **_to_approval_response(approval).model_dump(),
+        **base,
         histories=[_to_history_response(h) for h in histories],
+        source=ApprovalSource(**source) if source else None,
     )
     return {"data": detail.model_dump(mode="json")}
 
