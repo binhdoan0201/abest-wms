@@ -116,14 +116,41 @@ VI_LABELS: dict[str, str] = {
     "SUPERSEDED_BY_RECOUNT": "Thay bằng lần đếm lại",
     "AUTO_ESCALATE_SLA": "Tự chuyển cấp (quá SLA)",
     "AUTO_APPROVED_Z": "Tự duyệt (trong dung sai)",
+    # Trạng thái GRN & PO
+    "DRAFT": "Nháp",
+    "COUNTING": "Đang kiểm đếm",
+    "DISCREPANCY": "Có chênh lệch",
+    "RECOUNTING": "Đang đếm lại",
+    "CLOSED": "Đã đóng",
+    "SYNCED_ERP": "Đã đồng bộ ERP",
+    "RECEIVING": "Đang nhận hàng",
+    "PARTIAL_RECEIVED": "Nhận một phần",
+    "FULLY_RECEIVED": "Đã nhận đủ",
+    "CANCELLED": "Đã hủy",
+    # Nhãn theo ngữ cảnh (context:code)
+    "PO:PENDING": "Chờ nhận hàng",
+    "PO:CLOSED": "Đã đóng",
+    "GRN:CLOSED": "Đã hoàn tất",
+    "CC:CLOSED": "Đã đóng",
+    "CC:PENDING": "Chờ đếm",
+    # Trạng thái kiểm kê (Cycle Count)
+    "IN_PROGRESS": "Đang kiểm kê",
+    "PENDING_APPROVAL": "Chờ phê duyệt",
+    "RECOUNT_REQUIRED": "Yêu cầu đếm lại",
+    "ADJUSTED": "Đã điều chỉnh tồn",
 }
 
 
-def vi_label(value: Any) -> str:
-    """Nhãn tiếng Việt cho mã; mã chưa có nhãn thì giữ nguyên."""
+def vi_label(value: Any, context: str | None = None) -> str:
+    """Nhãn tiếng Việt cho mã; ưu tiên context:code rồi mới tra mã chung."""
     if value is None:
         return ""
-    return VI_LABELS.get(str(value), str(value))
+    code = str(value)
+    if context:
+        scoped = VI_LABELS.get(f"{context}:{code}")
+        if scoped is not None:
+            return scoped
+    return VI_LABELS.get(code, code)
 
 
 def register_filters(templates: Jinja2Templates) -> None:
