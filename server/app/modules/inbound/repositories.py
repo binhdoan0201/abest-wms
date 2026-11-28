@@ -291,7 +291,7 @@ class InboundRepository:
                 "cby": created_by,
             },
         )
-        return pid
+        return pid if isinstance(pid, uuid.UUID) else None
 
     @staticmethod
     def update_pallet_status(
@@ -328,6 +328,107 @@ class InboundRepository:
                 {"pid": pallet_id, "st": status},
             )
         return int(ver or 1)
+
+    @staticmethod
+    def get_pallet_by_code(db: Session, pallet_code: str) -> uuid.UUID | None:
+        pid = db.scalar(
+            text(
+                """
+                SELECT pallet_id
+                FROM pallets
+                WHERE pallet_code = :pcode;
+                """
+            ),
+            {"pcode": pallet_code},
+        )
+        return pid if isinstance(pid, uuid.UUID) else None
+
+    @staticmethod
+    def reactivate_pallet_for_grn(
+        db: Session,
+        pallet_id: uuid.UUID,
+        location_id: uuid.UUID | None,
+        source_grn_id: uuid.UUID,
+        status: str,
+    ) -> uuid.UUID:
+        db.execute(
+            text(
+                """
+                UPDATE pallets
+                SET status = CAST(:st AS pallet_status_type),
+                    current_location_id = :loc,
+                    source_grn_id = :grn,
+                    version_no = version_no + 1
+                WHERE pallet_id = :pid;
+                """
+            ),
+            {
+                "pid": pallet_id,
+                "st": status,
+                "loc": location_id,
+                "grn": source_grn_id,
+            },
+        )
+        return pallet_id
+
+    @staticmethod
+    def cleanup_empty_damaged_pallets(db: Session, grn_id: uuid.UUID) -> None:
+        rows = db.execute(
+            text(
+                """
+                SELECT p.pallet_id
+                FROM pallets p
+                WHERE p.source_grn_id = :grn_id
+                  AND p.status = 'DAMAGED_HOLD'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM grn_lines gl
+                      WHERE gl.damaged_pallet_id = p.pallet_id AND gl.qty_damaged > 0
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM inventory_balances ib
+                      WHERE ib.pallet_id = p.pallet_id
+                        AND (ib.qty_available > 0 OR ib.qty_damaged > 0 OR ib.qty_allocated > 0)
+                  );
+                """
+            ),
+            {"grn_id": grn_id},
+        ).fetchall()
+        for r in rows:
+            db.execute(
+                text(
+                    """
+                    UPDATE pallets
+                    SET status = CAST('EMPTY' AS pallet_status_type),
+                        version_no = version_no + 1
+                    WHERE pallet_id = :pid;
+                    """
+                ),
+                {"pid": r[0]},
+            )
+
+    @staticmethod
+    def list_recountable_grn_ids(db: Session, grn_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        if not grn_ids:
+            return set()
+        rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT ar.object_id
+                FROM approval_requests ar
+                WHERE ar.object_type = 'GRN_DISCREPANCY'
+                  AND ar.object_id = ANY(:oids)
+                  AND ar.status = 'NEED_INFO'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM approval_histories ah
+                      WHERE ah.approval_id = ar.approval_id
+                        AND ah.action = 'REQUEST_RECOUNT'
+                  );
+                """
+            ),
+            {"oids": grn_ids},
+        ).all()
+        return {row[0] for row in rows if row and row[0] is not None}
 
     @staticmethod
     def get_open_approval_for_grn(db: Session, grn_id: uuid.UUID) -> tuple[uuid.UUID, str] | None:
@@ -433,7 +534,13 @@ class InboundRepository:
                            WHERE ib.location_id = l.location_id
                              AND ib.sku_id = ANY(:sku_ids)
                              AND ib.qty_available > 0
-                       ) AS has_same_sku
+                       ) AS has_same_sku,
+                       EXISTS (
+                           SELECT 1 FROM inventory_balances ib
+                           WHERE ib.location_id = l.location_id
+                             AND NOT (ib.sku_id = ANY(:sku_ids))
+                             AND (ib.qty_available > 0 OR ib.qty_allocated > 0)
+                       ) AS has_other_sku
                 FROM locations l
                 JOIN zones z ON z.zone_id = l.zone_id
                 WHERE l.warehouse_id = :wh
@@ -441,8 +548,12 @@ class InboundRepository:
                   AND l.is_active = TRUE
                   AND z.is_active = TRUE
                   AND l.status IN ('EMPTY', 'PARTIAL')
-                  AND (:excl_loc IS NULL OR l.location_id <> :excl_loc)
-                ORDER BY has_same_sku DESC, l.current_capacity_pct DESC, l.location_code ASC
+                  AND (CAST(:excl_loc AS uuid) IS NULL OR l.location_id <> CAST(:excl_loc AS uuid))
+                ORDER BY
+                    has_same_sku DESC,
+                    has_other_sku ASC,
+                    l.current_capacity_pct DESC,
+                    l.location_code ASC
                 LIMIT 5;
                 """
             ),

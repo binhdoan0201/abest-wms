@@ -392,7 +392,12 @@ class InboundService:
         rows, total = InboundRepository.list_grns(
             db, warehouse_id, status, po_id, owner_filter, (page - 1) * page_size, page_size
         )
-        items = [_grn_dict(g, g.is_blind_receipt and user.role_code == HIDE_QTY_ROLE) for g in rows]
+        recountable_ids = InboundRepository.list_recountable_grn_ids(db, [g.grn_id for g in rows])
+        items: list[dict[str, Any]] = []
+        for g in rows:
+            item = _grn_dict(g, g.is_blind_receipt and user.role_code == HIDE_QTY_ROLE)
+            item["can_recount"] = g.grn_id in recountable_ids
+            items.append(item)
         return items, total, page, page_size
 
     @staticmethod
@@ -413,9 +418,11 @@ class InboundService:
                 message="Nhân viên nhận hàng chỉ được xem phiếu của chính mình",
                 http_status=403,
             )
+        can_recount = grn_id in InboundRepository.list_recountable_grn_ids(db, [grn_id])
         hide_blind = grn.is_blind_receipt and user.role_code == HIDE_QTY_ROLE
         lines = InboundRepository.get_grn_lines(db, grn_id)
         res = _grn_dict(grn, hide_blind)
+        res["can_recount"] = can_recount
         res["lines"] = [_grn_line_dict(ln, hide_blind) for ln in lines]
         return res
 
@@ -758,6 +765,12 @@ class InboundService:
         if dock_loc is None:
             dock_loc = InboundRepository.get_first_dock_location(db, grn.warehouse_id)
 
+        for ln in lines:
+            if ln.qty_damaged <= 0 and ln.damaged_pallet_id is not None:
+                ln.damaged_pallet_id = None
+        db.flush()
+        InboundRepository.cleanup_empty_damaged_pallets(db, grn.grn_id)
+
         if approval is None:
             # Tự động duyệt
             for ln in lines:
@@ -794,15 +807,26 @@ class InboundService:
                 ln.pallet_id = good_pallet_id
             if ln.qty_damaged > 0 and ln.damaged_pallet_id is None:
                 if dmg_pallet_id is None:
-                    dmg_pallet_id = InboundRepository.create_pallet(
-                        db,
-                        f"{grn.grn_number}-DMG",
-                        grn.warehouse_id,
-                        dock_loc,
-                        grn.grn_id,
-                        "DAMAGED_HOLD",
-                        actor_id,
-                    )
+                    dmg_code = f"{grn.grn_number}-DMG"
+                    existing_dmg_id = InboundRepository.get_pallet_by_code(db, dmg_code)
+                    if existing_dmg_id is not None:
+                        dmg_pallet_id = InboundRepository.reactivate_pallet_for_grn(
+                            db,
+                            existing_dmg_id,
+                            dock_loc,
+                            grn.grn_id,
+                            "DAMAGED_HOLD",
+                        )
+                    else:
+                        dmg_pallet_id = InboundRepository.create_pallet(
+                            db,
+                            dmg_code,
+                            grn.warehouse_id,
+                            dock_loc,
+                            grn.grn_id,
+                            "DAMAGED_HOLD",
+                            actor_id,
+                        )
                 ln.damaged_pallet_id = dmg_pallet_id
 
         db.flush()
@@ -903,12 +927,7 @@ class InboundService:
                 details={"current_version_no": grn.version_no},
             )
 
-        open_app = InboundRepository.get_open_approval_for_grn(db, grn_id)
-        if (
-            open_app is None
-            or open_app[1] != "NEED_INFO"
-            or not InboundRepository.has_recount_request_history(db, open_app[0])
-        ):
+        if grn_id not in InboundRepository.list_recountable_grn_ids(db, [grn_id]):
             raise BusinessError(
                 code="INVALID_STATE",
                 message="GRN chỉ được đếm lại khi người duyệt yêu cầu đếm lại (NEED_INFO)",
@@ -960,6 +979,8 @@ class InboundService:
                 )
             )
 
+        open_app = InboundRepository.get_open_approval_for_grn(db, grn_id)
+        assert open_app is not None
         grn.recount_count += 1
         supersede_approval_for_recount(
             db=db,
@@ -1085,15 +1106,26 @@ class InboundService:
             if ln.qty_damaged > 0:
                 if ln.damaged_pallet_id is None:
                     if dmg_pallet_id is None:
-                        dmg_pallet_id = InboundRepository.create_pallet(
-                            db,
-                            f"{grn.grn_number}-DMG",
-                            warehouse_id,
-                            dock_loc,
-                            grn.grn_id,
-                            "DAMAGED_HOLD",
-                            user.user_id,
-                        )
+                        dmg_code = f"{grn.grn_number}-DMG"
+                        existing_dmg_id = InboundRepository.get_pallet_by_code(db, dmg_code)
+                        if existing_dmg_id is not None:
+                            dmg_pallet_id = InboundRepository.reactivate_pallet_for_grn(
+                                db,
+                                existing_dmg_id,
+                                dock_loc,
+                                grn.grn_id,
+                                "DAMAGED_HOLD",
+                            )
+                        else:
+                            dmg_pallet_id = InboundRepository.create_pallet(
+                                db,
+                                dmg_code,
+                                warehouse_id,
+                                dock_loc,
+                                grn.grn_id,
+                                "DAMAGED_HOLD",
+                                user.user_id,
+                            )
                     ln.damaged_pallet_id = dmg_pallet_id
                 apply_movement(
                     db=db,
