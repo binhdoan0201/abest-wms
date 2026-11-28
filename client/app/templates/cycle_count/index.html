@@ -1,6 +1,25 @@
 {% extends "_base/layout.html" %}
 {% block title %}Kiểm kê kho (Cycle Count) - ABEST WMS{% endblock %}
 {% block content %}
+{% set cc_status_vi = {
+  "DRAFT": "Nháp",
+  "IN_PROGRESS": "Đang kiểm kê",
+  "COUNTING": "Đang đếm",
+  "PENDING": "Chờ đếm",
+  "PENDING_APPROVAL": "Chờ phê duyệt",
+  "PENDING_D1": "Chờ duyệt (Cấp 1)",
+  "PENDING_D2": "Chờ duyệt (Cấp 2)",
+  "PENDING_D3": "Chờ duyệt (Cấp 3)",
+  "NEED_INFO": "Yêu cầu đếm lại",
+  "RECOUNT_REQUIRED": "Yêu cầu đếm lại",
+  "RECOUNTING": "Đang đếm lại",
+  "DISCREPANCY": "Có chênh lệch",
+  "AUTO_APPROVED_Z": "Tự động duyệt (Khớp)",
+  "APPROVED": "Đã duyệt",
+  "ADJUSTED": "Đã điều chỉnh tồn",
+  "REJECTED": "Từ chối",
+  "CLOSED": "Đã đóng"
+} %}
 <div class="space-y-6 max-w-4xl mx-auto">
   <h1 class="text-2xl font-bold text-slate-800">Kiểm kê kho (Đếm mù)</h1>
 
@@ -41,7 +60,7 @@
       <div class="py-2.5 flex items-center justify-between">
         <div>
           <span class="font-semibold text-slate-800">{{ s.sheet_number }}</span>
-          <span class="ml-2 px-2 py-0.5 text-xs rounded bg-slate-100">{{ s.status }}</span>
+          <span class="ml-2 px-2 py-0.5 text-xs rounded bg-slate-100">{{ cc_status_vi.get(s.status, s.status) }}</span>
         </div>
         <a href="/cycle-count?sheet_id={{ s.count_sheet_id }}" class="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium">Mở đếm</a>
       </div>
@@ -56,7 +75,7 @@
     <div class="flex items-center justify-between border-b pb-3">
       <div>
         <h3 class="font-bold text-slate-800">Phiếu: {{ selected_sheet.sheet_number }}</h3>
-        <p class="text-xs text-slate-500">Trạng thái: {{ selected_sheet.status }}</p>
+        <p class="text-xs text-slate-500">Trạng thái: {{ cc_status_vi.get(selected_sheet.status, selected_sheet.status) }}</p>
       </div>
       {% if "TK-1.1" in perms and selected_sheet.status != "CLOSED" %}
       <form method="post" action="/cycle-count/{{ selected_sheet.count_sheet_id }}/close">
@@ -71,7 +90,7 @@
       <div class="p-3.5 border rounded-xl {{ 'bg-amber-50/70 border-amber-200' if is_recount else 'bg-slate-50' }} space-y-2">
         <div class="flex justify-between text-xs text-slate-600">
           <span>Vị trí: <strong>{{ ln.location_code or location_code_map.get(ln.location_id|string, ln.location_id) }}</strong></span>
-          <span class="px-2 py-0.5 rounded bg-white border font-medium">{{ ln.status }}</span>
+          <span class="px-2 py-0.5 rounded bg-white border font-medium">{{ cc_status_vi.get(ln.status, ln.status) }}</span>
         </div>
         <div class="text-xs text-slate-500">
           SKU: <strong>{{ ln.sku_code or sku_code_map.get(ln.sku_id|string, ln.sku_id) if ln.sku_id else "Vị trí trống" }}</strong> |

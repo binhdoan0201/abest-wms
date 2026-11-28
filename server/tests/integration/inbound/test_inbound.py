@@ -293,3 +293,220 @@ def test_grn_discrepancy_approval_marks_executed_on_complete() -> None:
         assert exec_status == "EXECUTED_INVENTORY"
     finally:
         db.close()
+
+
+def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None:
+    """Thứ tự gợi ý vị trí cất hàng: ô cùng SKU -> ô trống -> ô có SKU khác."""
+    from server.app.modules.inbound.repositories import InboundRepository
+
+    db = SessionLocal()
+    zone_id = uuid.uuid4()
+    loc_same_id = uuid.uuid4()
+    loc_empty_id = uuid.uuid4()
+    loc_other_id = uuid.uuid4()
+    other_sku_id = uuid.uuid4()
+    tag = uuid.uuid4().hex[:6].upper()
+
+    try:
+        zone_code = f"Z-TST-{tag}"
+        code_same = f"A-{tag}-01-SAME"
+        code_empty = f"A-{tag}-02-EMPTY"
+        code_other = f"A-{tag}-03-OTHER"
+
+        db.execute(
+            text(
+                """
+                INSERT INTO zones (
+                    zone_id, warehouse_id, zone_code, zone_name, zone_type, is_active
+                )
+                VALUES (:zid, :wh, :zcode, :zname, 'STORAGE', TRUE);
+                """
+            ),
+            {
+                "zid": zone_id,
+                "wh": WAREHOUSE_ID,
+                "zcode": zone_code,
+                "zname": f"Zone Test {tag}",
+            },
+        )
+        for lid, lcode, lstatus in [
+            (loc_same_id, code_same, "PARTIAL"),
+            (loc_empty_id, code_empty, "EMPTY"),
+            (loc_other_id, code_other, "PARTIAL"),
+        ]:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO locations (
+                        location_id, warehouse_id, zone_id, location_code,
+                        barcode, status, is_active
+                    )
+                    VALUES (
+                        :lid, :wh, :zid, :lcode, :bcode,
+                        CAST(:st AS location_status_type), TRUE
+                    );
+                    """
+                ),
+                {
+                    "lid": lid,
+                    "wh": WAREHOUSE_ID,
+                    "zid": zone_id,
+                    "lcode": lcode,
+                    "bcode": f"BC-{lcode}",
+                    "st": lstatus,
+                },
+            )
+        db.execute(
+            text(
+                """
+                INSERT INTO skus (sku_id, sku_code, sku_name, base_uom, is_active)
+                VALUES (:sid, :scode, :sname, 'PCS', TRUE);
+                """
+            ),
+            {
+                "sid": other_sku_id,
+                "scode": f"SKU-OTHER-{tag}",
+                "sname": f"Other SKU {tag}",
+            },
+        )
+        for bal_id, loc_id, sid in [
+            (uuid.uuid4(), loc_same_id, SKU_ID),
+            (uuid.uuid4(), loc_other_id, other_sku_id),
+        ]:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO inventory_balances (
+                        balance_id, warehouse_id, location_id, sku_id, qty_available
+                    )
+                    VALUES (:bid, :wh, :lid, :sid, 5);
+                    """
+                ),
+                {"bid": bal_id, "wh": WAREHOUSE_ID, "lid": loc_id, "sid": sid},
+            )
+        db.commit()
+
+        suggestions = InboundRepository.suggest_locations_for_pallet(
+            db=db,
+            warehouse_id=WAREHOUSE_ID,
+            exclude_location_id=None,
+            zone_type="STORAGE",
+            sku_ids=[SKU_ID],
+        )
+        by_id = {uuid.UUID(s["location_id"]): s for s in suggestions}
+        assert loc_same_id in by_id
+        assert by_id[loc_same_id]["same_sku_consolidation"] is True
+
+        order = [uuid.UUID(s["location_id"]) for s in suggestions]
+        if loc_empty_id in by_id:
+            assert by_id[loc_empty_id]["same_sku_consolidation"] is False
+            assert by_id[loc_empty_id]["status"] == "EMPTY"
+            assert order.index(loc_same_id) < order.index(loc_empty_id)
+        if loc_other_id in by_id:
+            assert by_id[loc_other_id]["same_sku_consolidation"] is False
+            assert order.index(loc_same_id) < order.index(loc_other_id)
+            if loc_empty_id in by_id:
+                assert order.index(loc_empty_id) < order.index(loc_other_id)
+    finally:
+        db.rollback()
+        db.execute(
+            text("DELETE FROM inventory_balances WHERE location_id IN (:a, :b, :c);"),
+            {"a": loc_same_id, "b": loc_empty_id, "c": loc_other_id},
+        )
+        db.execute(
+            text("DELETE FROM locations WHERE location_id IN (:a, :b, :c);"),
+            {"a": loc_same_id, "b": loc_empty_id, "c": loc_other_id},
+        )
+        db.execute(text("DELETE FROM zones WHERE zone_id = :zid;"), {"zid": zone_id})
+        db.execute(text("DELETE FROM skus WHERE sku_id = :sid;"), {"sid": other_sku_id})
+        db.commit()
+        db.close()
+
+
+def test_damaged_pallet_cleanup_and_reuse_across_recounts() -> None:
+    """Pallet DMG bị dọn sang EMPTY khi hết hư vẫn tái sử dụng được khi đếm lại lần 2 có hàng hư."""
+    from server.app.modules.inbound.repositories import InboundRepository
+
+    db = SessionLocal()
+    grn_id = uuid.uuid4()
+    line_id = uuid.uuid4()
+    pallet_id = uuid.uuid4()
+    tag = uuid.uuid4().hex[:6].upper()
+    grn_number = f"GRN-DMG-{tag}"
+    dmg_code = f"{grn_number}-DMG"
+
+    try:
+        wh_id = db.execute(
+            text("SELECT warehouse_id FROM locations WHERE warehouse_id = :wh LIMIT 1;"),
+            {"wh": WAREHOUSE_ID},
+        ).scalar_one()
+        user_id = db.execute(
+            text("SELECT user_id FROM users WHERE username = 'nv_nhan' LIMIT 1;")
+        ).scalar_one()
+
+        db.execute(
+            text(
+                """
+                INSERT INTO grns (grn_id, grn_number, warehouse_id, received_by, status, version_no)
+                VALUES (:gid, :gnum, :wh, :uid, 'PENDING_D1', 1);
+                """
+            ),
+            {"gid": grn_id, "gnum": grn_number, "wh": wh_id, "uid": user_id},
+        )
+        pallet_id = InboundRepository.create_pallet(
+            db=db,
+            pallet_code=dmg_code,
+            warehouse_id=wh_id,
+            location_id=None,
+            source_grn_id=grn_id,
+            status="DAMAGED_HOLD",
+            created_by=user_id,
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO grn_lines (
+                    grn_line_id, grn_id, sku_id, damaged_pallet_id, uom_code,
+                    qty_expected, qty_actual, qty_damaged
+                )
+                VALUES (:lid, :gid, :sku, :pid, 'PCS', 10, 8, 0);
+                """
+            ),
+            {"lid": line_id, "gid": grn_id, "sku": SKU_ID, "pid": pallet_id},
+        )
+        db.commit()
+
+        # Lần 1: không còn hàng hư -> dọn pallet DMG sang EMPTY
+        InboundRepository.cleanup_empty_damaged_pallets(db, grn_id)
+        db.commit()
+        status_after_cleanup = db.execute(
+            text("SELECT status::text FROM pallets WHERE pallet_id = :pid;"),
+            {"pid": pallet_id},
+        ).scalar_one()
+        assert status_after_cleanup == "EMPTY"
+
+        # Lần 2: lại có hàng hư -> tìm thấy pallet cũ và tái sử dụng thành công
+        found_id = InboundRepository.get_pallet_by_code(db, dmg_code)
+        assert found_id == pallet_id
+        reused_id = InboundRepository.reactivate_pallet_for_grn(
+            db=db,
+            pallet_id=found_id,
+            location_id=None,
+            source_grn_id=grn_id,
+            status="DAMAGED_HOLD",
+        )
+        db.commit()
+        assert reused_id == pallet_id
+        row = db.execute(
+            text("SELECT status::text, source_grn_id FROM pallets WHERE pallet_id = :pid;"),
+            {"pid": pallet_id},
+        ).one()
+        assert row[0] == "DAMAGED_HOLD"
+        assert row[1] == grn_id
+    finally:
+        db.rollback()
+        db.execute(text("DELETE FROM grn_lines WHERE grn_line_id = :lid;"), {"lid": line_id})
+        db.execute(text("DELETE FROM pallets WHERE pallet_id = :pid;"), {"pid": pallet_id})
+        db.execute(text("DELETE FROM grns WHERE grn_id = :gid;"), {"gid": grn_id})
+        db.commit()
+        db.close()
