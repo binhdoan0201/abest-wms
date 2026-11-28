@@ -443,3 +443,65 @@ def test_resolve_task_open_url_and_worker_no_uuid(
     assert resp.status_code == 200
     assert worker_uuid not in resp.text
     assert f"/inbound?grn_id={doc_id}" in resp.text
+
+
+def test_approvals_filter_labels_and_list_panel_reload(
+    web: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    thukho_cookie = _login(web, "thukho")
+    approval_id = str(uuid.uuid4())
+    orig_get = ApiClient.get
+
+    sample_item = {
+        "approval_id": approval_id,
+        "object_type": "GRN_DISCREPANCY",
+        "object_id": str(uuid.uuid4()),
+        "object_ref": "GRN-20261128-001",
+        "current_tier": "D1_THUKHO",
+        "status": "PENDING_D1",
+        "discrepancy_value_amount": "500000.00",
+        "version_no": 1,
+        "sla_due_at": "2026-11-28T15:00:00Z",
+    }
+
+    def fake_get(
+        self: ApiClient, path: str, params: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        if path.startswith("/auth"):
+            return orig_get(self, path, params=params)
+        if path == "/approvals":
+            return {"data": [sample_item], "meta": {"total": 1}}
+        return {"data": sample_item}
+
+    def fake_post(
+        self: ApiClient, path: str, json_data: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        return {"data": sample_item}
+
+    monkeypatch.setattr(ApiClient, "get", fake_get)
+    monkeypatch.setattr(ApiClient, "post", fake_post)
+
+    # D4: Bộ lọc không hiển thị mã tiếng Anh thô
+    page = web.get("/approvals", cookies={"abest_session": thukho_cookie})
+    assert page.status_code == 200
+    assert "PENDING_D1 (Chờ Thủ kho)" not in page.text
+    assert ">Chờ thủ kho<" in page.text
+    assert 'hx-trigger="approvalsUpdated from:body"' in page.text
+
+    # D2: Quyết định xong trả header HX-Trigger để tự tải lại danh sách bên trái
+    decide = web.post(
+        f"/approvals/{approval_id}/decide",
+        data={"action": "approve", "version_no": "1", "reason_or_note": "OK"},
+        headers={"HX-Request": "true", **ORIGIN},
+        cookies={"abest_session": thukho_cookie},
+    )
+    assert decide.status_code == 200
+    assert decide.headers.get("HX-Trigger") == "approvalsUpdated"
+
+    list_panel = web.get(
+        "/approvals/list-panel?status=PENDING_D1",
+        headers={"HX-Request": "true"},
+        cookies={"abest_session": thukho_cookie},
+    )
+    assert list_panel.status_code == 200
+    assert "GRN-20261128-001" in list_panel.text

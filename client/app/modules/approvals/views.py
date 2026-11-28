@@ -141,6 +141,40 @@ def approvals_page(
     )
 
 
+@router.get("/list-panel", response_class=HTMLResponse)
+def approvals_list_panel_htmx(
+    request: Request,
+    status: str | None = None,
+    tier: str | None = None,
+    object_type: str | None = None,
+    expired: str | None = None,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> Response:
+    """HTMX: tải lại danh sách hồ sơ phê duyệt bên trái sau khi quyết định."""
+    api = ApiClient(token=get_session_token(request))
+    expired_bool: bool | None = True if expired == "true" else None
+    try:
+        items, meta, _ = _fetch_queue(
+            api,
+            status=status or None,
+            tier=tier or None,
+            object_type=object_type or None,
+            expired=expired_bool,
+        )
+    except ClientApiError:
+        items, meta = [], {}
+    return get_templates(request).TemplateResponse(
+        request=request,
+        name="approvals/_list_panel.html",
+        context={
+            "request": request,
+            "user": user,
+            "items": items,
+            "meta": meta,
+        },
+    )
+
+
 @router.get("/{approval_id}/panel", response_class=HTMLResponse)
 def approval_detail_panel_htmx(
     request: Request,
@@ -264,7 +298,7 @@ def approval_decide_htmx(
     except ClientApiError:
         pass
 
-    return get_templates(request).TemplateResponse(
+    resp = get_templates(request).TemplateResponse(
         request=request,
         name="approvals/_detail_panel.html",
         context={
@@ -276,3 +310,6 @@ def approval_decide_htmx(
             "flash_msg": flash_msg,
         },
     )
+    if api_error is None:
+        resp.headers["HX-Trigger"] = "approvalsUpdated"
+    return resp

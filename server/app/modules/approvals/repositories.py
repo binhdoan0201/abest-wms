@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import cast, func, or_, select, text
+from sqlalchemy import case, cast, func, or_, select, text
 from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 from sqlalchemy.orm import Session
 
@@ -182,10 +182,24 @@ def list_approvals(
     total_stmt = select(func.count()).select_from(ApprovalRequest).where(*conditions)
     total = int(db.execute(total_stmt).scalar_one() or 0)
 
+    pending_rank = case(
+        (
+            ApprovalRequest.status.in_(
+                [
+                    cast("PENDING_D1", PG_APPROVAL_STATUS),
+                    cast("PENDING_D2", PG_APPROVAL_STATUS),
+                    cast("PENDING_D3", PG_APPROVAL_STATUS),
+                    cast("NEED_INFO", PG_APPROVAL_STATUS),
+                ]
+            ),
+            0,
+        ),
+        else_=1,
+    )
     items_stmt = (
         select(ApprovalRequest)
         .where(*conditions)
-        .order_by(ApprovalRequest.created_at.asc())
+        .order_by(pending_rank.asc(), ApprovalRequest.created_at.asc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
