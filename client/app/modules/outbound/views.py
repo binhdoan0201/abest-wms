@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from client.app.core.api_client import ApiClient, ClientApiError
 from client.app.core.auth_guard import build_user_menu, get_current_user
+from client.app.core.formatting import format_qty
 from client.app.core.session import get_session_token
 
 router = APIRouter(tags=["Outbound Views"])
@@ -94,34 +95,41 @@ def _format_expiry_date(raw_val: Any) -> str:
 def _load_lot_and_location_maps(api: ApiClient) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     lot_map: dict[str, dict[str, str]] = {}
     loc_map: dict[str, str] = {}
+    page_size = 100
+    max_pages = 50
     for endpoint, target in (("/lots", "lot"), ("/locations", "loc")):
-        try:
-            raw = api.get(endpoint, params={"page_size": 200}).get("data", [])
-        except ClientApiError:
-            continue
-        rows = raw.get("items", []) if isinstance(raw, dict) else raw
-        if not isinstance(rows, list):
-            continue
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            if target == "lot":
-                lid = str(row.get("lot_id") or row.get("id") or "").strip()
-                if not lid:
-                    continue
-                code = str(row.get("lot_code") or row.get("lot_number") or lid[:8]).strip()
-                exp_raw = (
-                    row.get("expiry_date")
-                    or row.get("exp_date")
-                    or row.get("expiration_date")
-                    or ""
+        for page in range(1, max_pages + 1):
+            try:
+                raw = api.get(endpoint, params={"page": page, "page_size": page_size}).get(
+                    "data", []
                 )
-                lot_map[lid] = {"code": code, "expiry": _format_expiry_date(exp_raw)}
-            else:
-                loc_id = str(row.get("location_id") or row.get("id") or "").strip()
-                loc_code = str(row.get("location_code") or row.get("code") or "").strip()
-                if loc_id and loc_code:
-                    loc_map[loc_id] = loc_code
+            except ClientApiError:
+                break
+            rows = raw.get("items", []) if isinstance(raw, dict) else raw
+            if not isinstance(rows, list) or not rows:
+                break
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if target == "lot":
+                    lid = str(row.get("lot_id") or row.get("id") or "").strip()
+                    if not lid:
+                        continue
+                    code = str(row.get("lot_code") or row.get("lot_number") or lid[:8]).strip()
+                    exp_raw = (
+                        row.get("expiry_date")
+                        or row.get("exp_date")
+                        or row.get("expiration_date")
+                        or ""
+                    )
+                    lot_map[lid] = {"code": code, "expiry": _format_expiry_date(exp_raw)}
+                else:
+                    loc_id = str(row.get("location_id") or row.get("id") or "").strip()
+                    loc_code = str(row.get("location_code") or row.get("code") or "").strip()
+                    if loc_id and loc_code:
+                        loc_map[loc_id] = loc_code
+            if len(rows) < page_size:
+                break
     return lot_map, loc_map
 
 
@@ -358,7 +366,9 @@ def outbound_page(
         return _render_403(request, user, menu, "Không có quyền truy cập phân hệ Xuất kho")
     orders, pick_session, api_error = [], None, None
     selected_session_id = (session_id or "").strip()
-    lot_map, loc_map = _load_lot_and_location_maps(api) if "SO-1" in perms else ({}, {})
+    lot_map, loc_map = (
+        _load_lot_and_location_maps(api) if ("SO-1" in perms and selected_session_id) else ({}, {})
+    )
     if "QL-2.1" in perms:
         try:
             q = f"/outbound-orders?status={status}" if status else "/outbound-orders"
@@ -418,9 +428,9 @@ def outbound_picking_page(
     perms = _extract_perms(user)
     if "SO-1" not in perms:
         return _render_403(request, user, menu, "Chỉ nhân viên soạn hàng mới có quyền truy cập")
-    lot_map, loc_map = _load_lot_and_location_maps(api)
     pick_session, api_error = None, None
     selected_session_id = (session_id or "").strip()
+    lot_map, loc_map = _load_lot_and_location_maps(api) if selected_session_id else ({}, {})
     if selected_session_id:
         try:
             pick_session = _enrich_pick_session(
@@ -659,7 +669,12 @@ def outbound_allocate_htmx(
             for a in allocs:
                 if not isinstance(a, dict):
                     continue
-                qty_a = str(a.get("qty_allocated") or "").strip()
+                qty_raw = a.get("qty_allocated")
+                qty_a = (
+                    format_qty(qty_raw)
+                    if qty_raw is not None and str(qty_raw).strip() != ""
+                    else ""
+                )
                 loc_id = str(a.get("location_id") or "").strip()
                 lot_id = str(a.get("lot_id") or "").strip()
                 loc_label = str(a.get("location_code") or loc_map.get(loc_id) or loc_id[:8]).strip()
@@ -674,7 +689,7 @@ def outbound_allocate_htmx(
                 reserved_parts.append(piece)
         if has_shortage or order_st == "ON_HOLD":
             detail_txt = f" ({'; '.join(reserved_parts)})" if reserved_parts else ""
-            warning_msg = f"Cảnh báo thiếu tồn kho — đơn chuyển trạng thái ON_HOLD{detail_txt}."
+            warning_msg = f"Cảnh báo thiếu tồn kho — đơn tạm dừng chờ hàng{detail_txt}."
         else:
             detail_txt = f": {'; '.join(reserved_parts)}" if reserved_parts else "!"
             flash_msg = f"Đã cấp phát tồn kho thành công{detail_txt}"

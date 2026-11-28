@@ -726,7 +726,7 @@ def test_outbound_h1_h2_h5_helpers_and_views():
     assert "Sữa tươi" in summary
 
 
-def test_outbound_h2_allocate_shortage_and_success_messages():
+def test_outbound_h2_lot_and_location_maps_and_pagination():
     from client.app.modules.outbound.views import _load_lot_and_location_maps
 
     class _DummyApi:
@@ -756,3 +756,263 @@ def test_outbound_h5_confirm_gi_payload_fields():
     assert res["gi_number"] == "GI-2026-001"
     assert res["order_status"] == "SHIPPED"
     assert res["tms_waybill_code"] == "TMS-WB-999"
+
+
+def test_outbound_h2_allocate_real_api_shows_location_code_and_formatted_qty(
+    web: TestClient,
+) -> None:
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from sqlalchemy import text
+
+    from server.app.core.database import SessionLocal
+    from server.app.modules.inventory import models as inv_models
+    from server.app.modules.master_data import models as md_models
+    from server.app.modules.outbound import models as out_models
+
+    suffix = uuid.uuid4().hex[:8]
+    db = SessionLocal()
+    created_ids: dict[str, uuid.UUID] = {}
+    created_loc = False
+    created_customer = False
+    try:
+        wh_row = db.execute(text("SELECT warehouse_id FROM warehouses LIMIT 1")).first()
+        if wh_row and wh_row[0]:
+            warehouse_id = uuid.UUID(str(wh_row[0]))
+        else:
+            warehouse_id = uuid.uuid4()
+            db.execute(
+                text(
+                    "INSERT INTO warehouses "
+                    "(warehouse_id, warehouse_code, warehouse_name, is_active) "
+                    "VALUES (:wid, :wcode, :wname, true)"
+                ),
+                {
+                    "wid": str(warehouse_id),
+                    "wcode": f"WH-{suffix}",
+                    "wname": f"Kho Test {suffix}",
+                },
+            )
+
+        zone_row = db.execute(
+            text("SELECT zone_id FROM zones WHERE warehouse_id = :wid LIMIT 1"),
+            {"wid": str(warehouse_id)},
+        ).first()
+        if not zone_row:
+            zone_row = db.execute(text("SELECT zone_id FROM zones LIMIT 1")).first()
+        if zone_row and zone_row[0]:
+            zone_id = uuid.UUID(str(zone_row[0]))
+        else:
+            zone_id = uuid.uuid4()
+            db.execute(
+                text(
+                    "INSERT INTO zones "
+                    "(zone_id, warehouse_id, zone_code, zone_name, zone_type, is_active) "
+                    "VALUES (:zid, :wid, :zcode, :zname, 'STORAGE', true)"
+                ),
+                {
+                    "zid": str(zone_id),
+                    "wid": str(warehouse_id),
+                    "zcode": f"Z-{suffix}",
+                    "zname": f"Zone Test {suffix}",
+                },
+            )
+
+        cust_row = db.execute(text("SELECT customer_id FROM customers LIMIT 1")).first()
+        if cust_row and cust_row[0]:
+            customer_id = uuid.UUID(str(cust_row[0]))
+        else:
+            customer_id = uuid.uuid4()
+            db.execute(
+                text(
+                    "INSERT INTO customers "
+                    "(customer_id, customer_code, customer_name, is_active) "
+                    "VALUES (:cid, :ccode, :cname, true)"
+                ),
+                {
+                    "cid": str(customer_id),
+                    "ccode": f"CUST-{suffix}",
+                    "cname": f"Khach Test {suffix}",
+                },
+            )
+            created_customer = True
+
+        sku = md_models.Sku(
+            sku_code=f"SKU-REAL-{suffix}",
+            sku_name="Sữa tươi tiệt trùng nguyên chất 1L",
+            base_uom="Hộp",
+        )
+        existing_loc = db.execute(
+            text(
+                "SELECT location_id FROM locations "
+                "WHERE warehouse_id = :wid AND location_code = 'LOC-A02-01' LIMIT 1"
+            ),
+            {"wid": str(warehouse_id)},
+        ).first()
+        if existing_loc and existing_loc[0]:
+            loc_id = uuid.UUID(str(existing_loc[0]))
+            db.add(sku)
+            db.flush()
+        else:
+            loc = md_models.Location(
+                warehouse_id=warehouse_id,
+                zone_id=zone_id,
+                location_code="LOC-A02-01",
+                barcode=f"BC-LOC-{suffix}",
+                is_active=True,
+            )
+            db.add_all([sku, loc])
+            db.flush()
+            loc_id = loc.location_id
+            created_loc = True
+
+        lot = inv_models.Lot(
+            sku_id=sku.sku_id,
+            lot_number="DEMO-SUA-A",
+        )
+        db.add(lot)
+        db.flush()
+
+        inv_bal = inv_models.InventoryBalance(
+            warehouse_id=warehouse_id,
+            location_id=loc_id,
+            sku_id=sku.sku_id,
+            lot_id=lot.lot_id,
+            qty_available=Decimal("50"),
+            qty_allocated=Decimal("0"),
+        )
+        order = out_models.OutboundOrder(
+            erp_order_number=f"SO-REAL-{suffix}",
+            order_type="SO",
+            warehouse_id=warehouse_id,
+            customer_id=customer_id,
+            status="NEW",
+            cutoff_time=datetime.now(timezone.utc) + timedelta(days=1),
+            version_no=1,
+        )
+        db.add_all([inv_bal, order])
+        db.flush()
+
+        line = out_models.OutboundOrderLine(
+            order_id=order.order_id,
+            sku_id=sku.sku_id,
+            qty_ordered=Decimal("10"),
+        )
+        db.add(line)
+        db.commit()
+
+        created_ids = {
+            "line_id": line.order_line_id,
+            "order_id": order.order_id,
+            "balance_id": inv_bal.balance_id,
+            "lot_id": lot.lot_id,
+            "loc_id": loc_id,
+            "sku_id": sku.sku_id,
+        }
+
+        cookies = _login(web, "thukho")
+        resp = web.post(
+            f"/outbound/orders/{order.order_id}/allocate",
+            data={"version_no": "1", "strategy": "FEFO"},
+            cookies=cookies,
+            headers=ORIGIN,
+        )
+        assert resp.status_code == 200
+        assert "LOC-A02-01" in resp.text
+        assert "DEMO-SUA-A" in resp.text
+        assert "Giữ 10 tại LOC-A02-01, lô DEMO-SUA-A" in resp.text
+        assert "10.000" not in resp.text
+    finally:
+        if created_ids:
+            db.rollback()
+            db.execute(
+                text("DELETE FROM outbound_order_lines WHERE order_line_id = :lid"),
+                {"lid": str(created_ids["line_id"])},
+            )
+            db.execute(
+                text("DELETE FROM outbound_orders WHERE order_id = :oid"),
+                {"oid": str(created_ids["order_id"])},
+            )
+            db.execute(
+                text("DELETE FROM inventory_balances WHERE balance_id = :bid"),
+                {"bid": str(created_ids["balance_id"])},
+            )
+            if created_loc:
+                db.execute(
+                    text("DELETE FROM locations WHERE location_id = :locid"),
+                    {"locid": str(created_ids["loc_id"])},
+                )
+            if created_customer:
+                db.execute(
+                    text("DELETE FROM customers WHERE customer_id = :cid"),
+                    {"cid": str(customer_id)},
+                )
+            db.commit()
+        db.close()
+
+
+def test_outbound_h2_allocate_shortage_on_hold_warning_banner(
+    web: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from client.app.core.api_client import ApiClient
+    from client.app.modules.outbound import views as out_views
+
+    order_id = uuid.uuid4()
+    fake_order = {
+        "order_id": str(order_id),
+        "erp_order_number": "SO-SHORT-01",
+        "status": "ON_HOLD",
+        "version_no": 2,
+        "lines": [{"sku_id": str(uuid.uuid4()), "qty_ordered": 100}],
+    }
+
+    orig_post = ApiClient.post
+    orig_get = ApiClient.get
+
+    def fake_post(
+        self: ApiClient,
+        path: str,
+        *,
+        json_data: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        if path.endswith("/allocate"):
+            assert json_data is not None
+            return {
+                "data": {
+                    "order_id": str(order_id),
+                    "status": "ON_HOLD",
+                    "has_shortage": True,
+                    "version_no": 2,
+                    "shortages": [{"sku_code": "SKU-01", "shortage_qty": 40}],
+                    "allocations": [],
+                }
+            }
+        return orig_post(self, path, json_data=json_data)
+
+    def fake_get(
+        self: ApiClient,
+        path: str,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        if path.endswith(f"/outbound-orders/{order_id}"):
+            return {"data": fake_order}
+        if path.startswith("/outbound-orders"):
+            return {"data": [fake_order]}
+        return orig_get(self, path, params=params)
+
+    monkeypatch.setattr(ApiClient, "post", fake_post)
+    monkeypatch.setattr(ApiClient, "get", fake_get)
+    monkeypatch.setattr(out_views, "_load_lot_and_location_maps", lambda *a, **kw: ({}, {}))
+
+    cookies = _login(web, "thukho")
+    resp = web.post(
+        f"/outbound/orders/{order_id}/allocate",
+        data={"version_no": "1", "strategy": "FEFO"},
+        cookies=cookies,
+        headers=ORIGIN,
+    )
+    assert resp.status_code == 200
+    assert "tạm dừng chờ hàng" in resp.text
+    assert "ON_HOLD" not in resp.text
