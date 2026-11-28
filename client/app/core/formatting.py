@@ -116,6 +116,17 @@ VI_LABELS: dict[str, str] = {
     "SUPERSEDED_BY_RECOUNT": "Thay bằng lần đếm lại",
     "AUTO_ESCALATE_SLA": "Tự chuyển cấp (quá SLA)",
     "AUTO_APPROVED_Z": "Tự duyệt (trong dung sai)",
+    # Trạng thái GRN & PO
+    "DRAFT": "Nháp",
+    "COUNTING": "Đang kiểm đếm",
+    "DISCREPANCY": "Có chênh lệch",
+    "RECOUNTING": "Đang đếm lại",
+    "CLOSED": "Đã đóng",
+    "SYNCED_ERP": "Đã đồng bộ ERP",
+    "RECEIVING": "Đang nhận hàng",
+    "PARTIAL_RECEIVED": "Nhận một phần",
+    "FULLY_RECEIVED": "Đã nhận đủ",
+    "CANCELLED": "Đã hủy",
 }
 
 

@@ -392,7 +392,16 @@ class InboundService:
         rows, total = InboundRepository.list_grns(
             db, warehouse_id, status, po_id, owner_filter, (page - 1) * page_size, page_size
         )
-        items = [_grn_dict(g, g.is_blind_receipt and user.role_code == HIDE_QTY_ROLE) for g in rows]
+        items: list[dict[str, Any]] = []
+        for g in rows:
+            item = _grn_dict(g, g.is_blind_receipt and user.role_code == HIDE_QTY_ROLE)
+            open_app = InboundRepository.get_open_approval_for_grn(db, g.grn_id)
+            item["can_recount"] = bool(
+                open_app is not None
+                and open_app[1] == "NEED_INFO"
+                and InboundRepository.has_recount_request_history(db, open_app[0])
+            )
+            items.append(item)
         return items, total, page, page_size
 
     @staticmethod
