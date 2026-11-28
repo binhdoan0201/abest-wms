@@ -50,3 +50,13 @@ def test_format_vn_datetime_and_labels() -> None:
     assert vi_label("GRN_DISCREPANCY") == "Chênh lệch nhận hàng"
     assert vi_label("REQUEST_RECOUNT") == "Yêu cầu đếm lại"
     assert vi_label("MA_LA") == "MA_LA"
+
+
+def test_vi_label_scoped_contexts() -> None:
+    from client.app.core.formatting import vi_label
+
+    assert vi_label("PENDING", "PO") == "Chờ nhận hàng"
+    assert vi_label("CLOSED", "GRN") == "Đã hoàn tất"
+    assert vi_label("APPROVED", "GRN") == "Đã duyệt"
+    assert vi_label("OPEN", "CC") == "Đang mở"
+    assert vi_label("PENDING", "CC") == "Chờ đếm"

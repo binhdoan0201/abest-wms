@@ -132,6 +132,7 @@ VI_LABELS: dict[str, str] = {
     "PO:CLOSED": "Đã đóng",
     "GRN:CLOSED": "Đã hoàn tất",
     "CC:CLOSED": "Đã đóng",
+    "CC:OPEN": "Đang mở",
     "CC:PENDING": "Chờ đếm",
     # Trạng thái kiểm kê (Cycle Count)
     "IN_PROGRESS": "Đang kiểm kê",
