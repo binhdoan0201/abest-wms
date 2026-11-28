@@ -59,7 +59,11 @@ def test_get_grn_detail_can_recount_only_when_need_info_and_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from types import SimpleNamespace
+    from typing import cast
 
+    from sqlalchemy.orm import Session
+
+    from server.app.core.rbac import UserContext
     from server.app.modules.inbound.services import InboundService
 
     grn_id = uuid.uuid4()
@@ -79,15 +83,18 @@ def test_get_grn_detail_can_recount_only_when_need_info_and_requested(
         created_at=None,
         updated_at=None,
     )
-    user = SimpleNamespace(
-        user_id=user_id,
-        username="nv_nhan",
-        role_code="nv_nhan",
-        primary_warehouse_id=wh_id,
-        warehouse_ids=[wh_id],
-        primary_stage=None,
-        is_seasonal=False,
-        is_safety_checked=True,
+    user = cast(
+        UserContext,
+        SimpleNamespace(
+            user_id=user_id,
+            username="nv_nhan",
+            role_code="nv_nhan",
+            primary_warehouse_id=wh_id,
+            warehouse_ids=[wh_id],
+            primary_stage=None,
+            is_seasonal=False,
+            is_safety_checked=True,
+        ),
     )
     app_id = uuid.uuid4()
 
@@ -108,7 +115,7 @@ def test_get_grn_detail_can_recount_only_when_need_info_and_requested(
         "has_recount_request_history",
         lambda _db, _aid: True,
     )
-    assert InboundService.get_grn_detail(None, user, grn_id)["can_recount"] is False
+    assert InboundService.get_grn_detail(cast(Session, None), user, grn_id)["can_recount"] is False
 
     # 2. Trạng thái khác NEED_INFO -> False
     monkeypatch.setattr(
@@ -116,7 +123,7 @@ def test_get_grn_detail_can_recount_only_when_need_info_and_requested(
         "get_open_approval_for_grn",
         lambda _db, _gid: (app_id, "PENDING"),
     )
-    assert InboundService.get_grn_detail(None, user, grn_id)["can_recount"] is False
+    assert InboundService.get_grn_detail(cast(Session, None), user, grn_id)["can_recount"] is False
 
     # 3. NEED_INFO nhưng chưa có REQUEST_RECOUNT -> False
     monkeypatch.setattr(
@@ -129,7 +136,7 @@ def test_get_grn_detail_can_recount_only_when_need_info_and_requested(
         "has_recount_request_history",
         lambda _db, _aid: False,
     )
-    assert InboundService.get_grn_detail(None, user, grn_id)["can_recount"] is False
+    assert InboundService.get_grn_detail(cast(Session, None), user, grn_id)["can_recount"] is False
 
     # 4. NEED_INFO và có REQUEST_RECOUNT -> True
     monkeypatch.setattr(
@@ -137,4 +144,4 @@ def test_get_grn_detail_can_recount_only_when_need_info_and_requested(
         "has_recount_request_history",
         lambda _db, _aid: True,
     )
-    assert InboundService.get_grn_detail(None, user, grn_id)["can_recount"] is True
+    assert InboundService.get_grn_detail(cast(Session, None), user, grn_id)["can_recount"] is True

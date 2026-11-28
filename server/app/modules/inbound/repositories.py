@@ -291,7 +291,7 @@ class InboundRepository:
                 "cby": created_by,
             },
         )
-        return pid
+        return pid if isinstance(pid, uuid.UUID) else None
 
     @staticmethod
     def update_pallet_status(
