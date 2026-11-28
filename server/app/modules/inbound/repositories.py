@@ -341,7 +341,7 @@ class InboundRepository:
             ),
             {"pcode": pallet_code},
         )
-        return pid
+        return pid if isinstance(pid, uuid.UUID) else None
 
     @staticmethod
     def reactivate_pallet_for_grn(
