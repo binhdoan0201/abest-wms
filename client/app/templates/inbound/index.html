@@ -24,7 +24,7 @@
           <select name="po_id" class="mt-1 w-full rounded-lg border-slate-300 text-sm">
             <option value="">-- Nhận không PO (Blind Receipt) --</option>
             {% for po in pos %}
-            <option value="{{ po.po_id }}">{{ po.erp_po_number }} ({{ po.status | vi_label }})</option>
+            <option value="{{ po.po_id }}">{{ po.erp_po_number }} ({{ po.status | vi_label('PO') }})</option>
             {% endfor %}
           </select>
         </div>
@@ -53,7 +53,7 @@
               <td class="py-2 px-3 font-medium">{{ g.grn_number }}</td>
               <td class="py-2 px-3">
                 <span class="px-2 py-0.5 rounded text-xs {{ 'bg-amber-100 text-amber-800 font-semibold' if (g.status in ['NEED_INFO', 'DISCREPANCY', 'RECOUNTING'] or g.status.startswith('PENDING_D')) else 'bg-slate-100' }}">
-                  {{ 'Yêu cầu đếm lại' if g.can_recount else g.status | vi_label }}
+                  {{ 'Yêu cầu đếm lại' if g.can_recount else g.status | vi_label('GRN') }}
                 </span>
               </td>
               <td class="py-2 px-3">{{ g.recount_count }}</td>
@@ -76,7 +76,7 @@
       <div>
         <h3 class="text-lg font-bold text-slate-800">Chi tiết GRN: {{ selected_grn.grn_number }}</h3>
         <p class="text-xs text-slate-500">
-          Trạng thái: <strong>{{ 'Yêu cầu đếm lại' if selected_grn.can_recount else selected_grn.status | vi_label }}</strong> |
+          Trạng thái: <strong>{{ 'Yêu cầu đếm lại' if selected_grn.can_recount else selected_grn.status | vi_label('GRN') }}</strong> |
           Phiên bản: {{ selected_grn.version_no }} |
           Lần đếm lại: {{ selected_grn.recount_count }}
         </p>

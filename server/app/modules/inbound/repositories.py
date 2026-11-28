@@ -407,6 +407,30 @@ class InboundRepository:
             )
 
     @staticmethod
+    def list_recountable_grn_ids(db: Session, grn_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        if not grn_ids:
+            return set()
+        rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT ar.object_id
+                FROM approval_requests ar
+                WHERE ar.object_type = 'GRN_DISCREPANCY'
+                  AND ar.object_id = ANY(:oids)
+                  AND ar.status = 'NEED_INFO'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM approval_histories ah
+                      WHERE ah.approval_id = ar.approval_id
+                        AND ah.action = 'REQUEST_RECOUNT'
+                  );
+                """
+            ),
+            {"oids": grn_ids},
+        ).all()
+        return {row[0] for row in rows if row and row[0] is not None}
+
+    @staticmethod
     def get_open_approval_for_grn(db: Session, grn_id: uuid.UUID) -> tuple[uuid.UUID, str] | None:
         row = db.execute(
             text(
