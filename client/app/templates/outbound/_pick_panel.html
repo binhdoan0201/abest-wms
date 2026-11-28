@@ -23,7 +23,19 @@
       <tbody class="divide-y divide-slate-100">
         {% for l in pick_session.lines %}
         <tr>
-          <td class="px-3 py-2 font-mono text-xs">{{ l.sku_code or l.line_no or loop.index }}</td>
+          <td class="px-3 py-2 text-xs">
+            <div class="font-mono font-semibold text-slate-800">{{ l.sku_code or l.line_no or loop.index }}</div>
+            {% if l.fefo_summary %}
+              <div class="text-slate-600 mt-0.5">{{ l.fefo_summary }}</div>
+            {% else %}
+              <div class="text-slate-600 mt-0.5">
+                {% if l.source_location_code %}{{ l.source_location_code }}{% endif %}
+                {% if l.lot_code %} · Lô {{ l.lot_code }}{% endif %}
+                {% if l.expiry_display %} · HSD {{ l.expiry_display }}{% endif %}
+                {% if l.sku_name %} · {{ l.sku_name }}{% endif %}
+              </div>
+            {% endif %}
+          </td>
           <td class="px-3 py-2">{{ l.qty_to_pick|qty }}</td>
           <td class="px-3 py-2">{{ l.status }}</td>
           <td class="px-3 py-2">

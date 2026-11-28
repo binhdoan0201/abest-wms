@@ -81,7 +81,56 @@ def _pick_session_label_from_detail(detail: dict[str, Any] | None, fallback_id: 
     return f"Phiên {fallback_id[:8]}" if fallback_id else "Phiên soạn"
 
 
-def _enrich_pick_session(session_data: Any, fallback_id: str = "") -> Any:
+def _format_expiry_date(raw_val: Any) -> str:
+    if not raw_val:
+        return ""
+    s = str(raw_val).strip()
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        yyyy, mm, dd = s[:4], s[5:7], s[8:10]
+        return f"{dd}/{mm}/{yyyy}"
+    return s
+
+
+def _load_lot_and_location_maps(api: ApiClient) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    lot_map: dict[str, dict[str, str]] = {}
+    loc_map: dict[str, str] = {}
+    for endpoint, target in (("/lots", "lot"), ("/locations", "loc")):
+        try:
+            raw = api.get(endpoint, params={"page_size": 200}).get("data", [])
+        except ClientApiError:
+            continue
+        rows = raw.get("items", []) if isinstance(raw, dict) else raw
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if target == "lot":
+                lid = str(row.get("lot_id") or row.get("id") or "").strip()
+                if not lid:
+                    continue
+                code = str(row.get("lot_code") or row.get("lot_number") or lid[:8]).strip()
+                exp_raw = (
+                    row.get("expiry_date")
+                    or row.get("exp_date")
+                    or row.get("expiration_date")
+                    or ""
+                )
+                lot_map[lid] = {"code": code, "expiry": _format_expiry_date(exp_raw)}
+            else:
+                loc_id = str(row.get("location_id") or row.get("id") or "").strip()
+                loc_code = str(row.get("location_code") or row.get("code") or "").strip()
+                if loc_id and loc_code:
+                    loc_map[loc_id] = loc_code
+    return lot_map, loc_map
+
+
+def _enrich_pick_session(
+    session_data: Any,
+    fallback_id: str = "",
+    lot_map: dict[str, dict[str, str]] | None = None,
+    loc_map: dict[str, str] | None = None,
+) -> Any:
     if not isinstance(session_data, dict):
         return session_data
     sid = str(session_data.get("pick_session_id") or fallback_id or "").strip()
@@ -90,6 +139,50 @@ def _enrich_pick_session(session_data: Any, fallback_id: str = "") -> Any:
     enriched["display_label"] = label
     if not str(enriched.get("pick_session_code") or "").strip():
         enriched["pick_session_code"] = label
+
+    l_map = lot_map or {}
+    c_map = loc_map or {}
+    raw_lines = enriched.get("lines")
+    if isinstance(raw_lines, list):
+        new_lines = []
+        for line in raw_lines:
+            if not isinstance(line, dict):
+                new_lines.append(line)
+                continue
+            item = dict(line)
+            loc_code = str(item.get("source_location_code") or "").strip()
+            if not loc_code:
+                loc_id = str(item.get("source_location_id") or "").strip()
+                loc_code = c_map.get(loc_id, loc_id[:8] if loc_id else "")
+            item["source_location_code"] = loc_code
+
+            lot_id = str(item.get("actual_lot_id") or item.get("suggested_lot_id") or "").strip()
+            lot_info = l_map.get(lot_id, {})
+            lot_code = str(
+                item.get("lot_code")
+                or item.get("lot_number")
+                or lot_info.get("code")
+                or (lot_id[:8] if lot_id else "")
+            ).strip()
+            exp_text = _format_expiry_date(
+                item.get("expiry_date") or item.get("exp_date") or lot_info.get("expiry") or ""
+            )
+            item["lot_code"] = lot_code
+            item["expiry_display"] = exp_text
+
+            parts = []
+            if loc_code:
+                parts.append(loc_code)
+            if lot_code:
+                parts.append(f"Lô {lot_code}")
+            if exp_text:
+                parts.append(f"HSD {exp_text}")
+            sku_name = str(item.get("sku_name") or "").strip()
+            if sku_name:
+                parts.append(sku_name)
+            item["fefo_summary"] = " · ".join(parts)
+            new_lines.append(item)
+        enriched["lines"] = new_lines
     return enriched
 
 
@@ -265,6 +358,7 @@ def outbound_page(
         return _render_403(request, user, menu, "Không có quyền truy cập phân hệ Xuất kho")
     orders, pick_session, api_error = [], None, None
     selected_session_id = (session_id or "").strip()
+    lot_map, loc_map = _load_lot_and_location_maps(api) if "SO-1" in perms else ({}, {})
     if "QL-2.1" in perms:
         try:
             q = f"/outbound-orders?status={status}" if status else "/outbound-orders"
@@ -278,6 +372,8 @@ def outbound_page(
             pick_session = _enrich_pick_session(
                 api.get(f"/pick-sessions/{selected_session_id}").get("data"),
                 selected_session_id,
+                lot_map,
+                loc_map,
             )
         except ClientApiError as exc:
             api_error = {"code": exc.code, "message": exc.message}
@@ -322,6 +418,7 @@ def outbound_picking_page(
     perms = _extract_perms(user)
     if "SO-1" not in perms:
         return _render_403(request, user, menu, "Chỉ nhân viên soạn hàng mới có quyền truy cập")
+    lot_map, loc_map = _load_lot_and_location_maps(api)
     pick_session, api_error = None, None
     selected_session_id = (session_id or "").strip()
     if selected_session_id:
@@ -329,6 +426,8 @@ def outbound_picking_page(
             pick_session = _enrich_pick_session(
                 api.get(f"/pick-sessions/{selected_session_id}").get("data"),
                 selected_session_id,
+                lot_map,
+                loc_map,
             )
         except ClientApiError as exc:
             api_error = {"code": exc.code, "message": exc.message}
@@ -543,12 +642,42 @@ def outbound_allocate_htmx(
 ) -> Response:
     api = ApiClient(token=get_session_token(request))
     flash_msg, api_error = None, None
+    warning_msg: str | None = None
     try:
-        api.post(
+        alloc_res = api.post(
             f"/outbound-orders/{order_id}/allocate",
             json_data={"strategy": strategy, **_v(version_no)},
-        )
-        flash_msg = "Đã cấp phát tồn kho thành công!"
+        ).get("data", {})
+        if not isinstance(alloc_res, dict):
+            alloc_res = {}
+        has_shortage = bool(alloc_res.get("has_shortage"))
+        order_st = str(alloc_res.get("status") or "").strip().upper()
+        allocs = alloc_res.get("allocations") or []
+        lot_map, loc_map = _load_lot_and_location_maps(api)
+        reserved_parts: list[str] = []
+        if isinstance(allocs, list):
+            for a in allocs:
+                if not isinstance(a, dict):
+                    continue
+                qty_a = str(a.get("qty_allocated") or "").strip()
+                loc_id = str(a.get("location_id") or "").strip()
+                lot_id = str(a.get("lot_id") or "").strip()
+                loc_label = str(a.get("location_code") or loc_map.get(loc_id) or loc_id[:8]).strip()
+                lot_label = str(
+                    a.get("lot_code") or lot_map.get(lot_id, {}).get("code") or lot_id[:8]
+                ).strip()
+                piece = f"Giữ {qty_a}" if qty_a else "Đã giữ"
+                if loc_label:
+                    piece += f" tại {loc_label}"
+                if lot_label:
+                    piece += f", lô {lot_label}"
+                reserved_parts.append(piece)
+        if has_shortage or order_st == "ON_HOLD":
+            detail_txt = f" ({'; '.join(reserved_parts)})" if reserved_parts else ""
+            warning_msg = f"Cảnh báo thiếu tồn kho — đơn chuyển trạng thái ON_HOLD{detail_txt}."
+        else:
+            detail_txt = f": {'; '.join(reserved_parts)}" if reserved_parts else "!"
+            flash_msg = f"Đã cấp phát tồn kho thành công{detail_txt}"
     except ClientApiError as exc:
         api_error = {"code": exc.code, "message": exc.message}
     ctx = _build_orders_table_context(
@@ -558,6 +687,8 @@ def outbound_allocate_htmx(
         flash_msg=flash_msg,
         api_error=api_error,
     )
+    if warning_msg:
+        ctx["warning_msg"] = warning_msg
     return get_templates(request).TemplateResponse(
         request=request, name="outbound/_orders_table.html", context=ctx
     )
@@ -774,8 +905,23 @@ def outbound_pack_ship_htmx(
                     f"/goods-issues/{selected_gi_id}/confirm",
                     json_data={"driver_signature_data": signer, **_v(version_no)},
                 ).get("data", {})
-                final_status = res.get("order_status") or res.get("status") or ""
-                flash_msg = f"Đã xuất kho {res.get('gi_number', '')} ({final_status})"
+                if not isinstance(res, dict):
+                    res = {}
+                confirmed_gi_id = str(res.get("gi_id") or selected_gi_id).strip()
+                confirmed_gi_no = str(
+                    res.get("gi_number") or (confirmed_gi_id[:8] if confirmed_gi_id else "")
+                ).strip()
+                final_status = str(res.get("order_status") or "SHIPPED").strip() or "SHIPPED"
+                wb_text = str(res.get("tms_waybill_code") or "").strip() or "chờ vận đơn"
+                if confirmed_gi_id:
+                    selected_gi_id = confirmed_gi_id
+                gi_info = {
+                    "gi_id": confirmed_gi_id,
+                    "gi_number": confirmed_gi_no,
+                    "order_status": final_status,
+                    "waybill_text": wb_text,
+                }
+                flash_msg = f"Đã xuất kho {confirmed_gi_no} — {final_status} — {wb_text}"
     except ClientApiError as exc:
         if exc.code == "OUTBOUND_WAYBILL_REQUIRED":
             api_error = {
