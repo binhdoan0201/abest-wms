@@ -524,7 +524,7 @@ class InboundRepository:
                   AND l.is_active = TRUE
                   AND z.is_active = TRUE
                   AND l.status IN ('EMPTY', 'PARTIAL')
-                  AND (:excl_loc IS NULL OR l.location_id <> :excl_loc)
+                  AND (CAST(:excl_loc AS uuid) IS NULL OR l.location_id <> CAST(:excl_loc AS uuid))
                 ORDER BY
                     has_same_sku DESC,
                     has_other_sku ASC,

@@ -297,10 +297,7 @@ def test_grn_discrepancy_approval_marks_executed_on_complete() -> None:
 
 def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None:
     """Thứ tự gợi ý vị trí cất hàng: ô cùng SKU -> ô trống -> ô có SKU khác."""
-    from decimal import Decimal
-
     from server.app.modules.inbound.repositories import InboundRepository
-    from server.app.modules.inventory.services import apply_movement
 
     db = SessionLocal()
     zone_id = uuid.uuid4()
@@ -309,7 +306,6 @@ def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None
     loc_other_id = uuid.uuid4()
     other_sku_id = uuid.uuid4()
     tag = uuid.uuid4().hex[:6].upper()
-    seed_ref = uuid.uuid4()
 
     try:
         zone_code = f"Z-TST-{tag}"
@@ -321,8 +317,8 @@ def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None
             text(
                 """
                 INSERT INTO zones (
-                        zone_id, warehouse_id, zone_code, zone_name, zone_type, is_active
-                    )
+                    zone_id, warehouse_id, zone_code, zone_name, zone_type, is_active
+                )
                 VALUES (:zid, :wh, :zcode, :zname, 'STORAGE', TRUE);
                 """
             ),
@@ -342,13 +338,13 @@ def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None
                 text(
                     """
                     INSERT INTO locations (
-                        location_id, warehouse_id, zone_id, location_code, barcode,
-                        status, is_active
+                        location_id, warehouse_id, zone_id, location_code,
+                        barcode, status, is_active
                     )
                     VALUES (
-                            :lid, :wh, :zid, :lcode, :bcode,
-                            CAST(:st AS location_status_type), TRUE
-                        );
+                        :lid, :wh, :zid, :lcode, :bcode,
+                        CAST(:st AS location_status_type), TRUE
+                    );
                     """
                 ),
                 {
@@ -373,38 +369,21 @@ def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None
                 "sname": f"Other SKU {tag}",
             },
         )
-        actor_id = db.execute(
-            text("SELECT user_id FROM users WHERE username = 'thukho' LIMIT 1;")
-        ).scalar_one()
-
-        apply_movement(
-            db=db,
-            warehouse_id=WAREHOUSE_ID,
-            location_id=loc_same_id,
-            sku_id=SKU_ID,
-            lot_id=None,
-            pallet_id=None,
-            serial_number=None,
-            tx_type="CYCLE_COUNT",
-            delta_available=Decimal("5"),
-            ref_doc_type="CYCLE_COUNT",
-            ref_doc_id=seed_ref,
-            performed_by=actor_id,
-        )
-        apply_movement(
-            db=db,
-            warehouse_id=WAREHOUSE_ID,
-            location_id=loc_other_id,
-            sku_id=other_sku_id,
-            lot_id=None,
-            pallet_id=None,
-            serial_number=None,
-            tx_type="CYCLE_COUNT",
-            delta_available=Decimal("5"),
-            ref_doc_type="CYCLE_COUNT",
-            ref_doc_id=seed_ref,
-            performed_by=actor_id,
-        )
+        for bal_id, loc_id, sid in [
+            (uuid.uuid4(), loc_same_id, SKU_ID),
+            (uuid.uuid4(), loc_other_id, other_sku_id),
+        ]:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO inventory_balances (
+                        balance_id, warehouse_id, location_id, sku_id, qty_available
+                    )
+                    VALUES (:bid, :wh, :lid, :sid, 5);
+                    """
+                ),
+                {"bid": bal_id, "wh": WAREHOUSE_ID, "lid": loc_id, "sid": sid},
+            )
         db.commit()
 
         suggestions = InboundRepository.suggest_locations_for_pallet(
@@ -423,10 +402,6 @@ def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None
     finally:
         db.rollback()
         db.execute(
-            text("DELETE FROM inventory_transactions WHERE ref_doc_id = :ref;"),
-            {"ref": seed_ref},
-        )
-        db.execute(
             text("DELETE FROM inventory_balances WHERE location_id IN (:a, :b, :c);"),
             {"a": loc_same_id, "b": loc_empty_id, "c": loc_other_id},
         )
@@ -438,7 +413,6 @@ def test_suggest_locations_priority_same_sku_then_empty_then_other_sku() -> None
         db.execute(text("DELETE FROM skus WHERE sku_id = :sid;"), {"sid": other_sku_id})
         db.commit()
         db.close()
-
 
 def test_damaged_pallet_cleanup_and_reuse_across_recounts() -> None:
     """Pallet DMG bị dọn sang EMPTY khi hết hư vẫn tái sử dụng được khi đếm lại lần 2 có hàng hư."""
