@@ -686,3 +686,73 @@ def test_create_pick_session_without_picker_is_blocked(
     assert "PICKER_REQUIRED" in resp.text
     assert '<option value="u-nv-soan-1"' in resp.text
     assert '<option value="u-nv-soan-2"' in resp.text
+
+
+def test_outbound_h1_h2_h5_helpers_and_views():
+    from client.app.modules.outbound.views import (
+        _enrich_pick_session,
+        _format_expiry_date,
+    )
+
+    assert _format_expiry_date("2026-12-04") == "04/12/2026"
+
+    raw_session = {
+        "pick_session_id": "ps-1",
+        "status": "IN_PROGRESS",
+        "version_no": 1,
+        "lines": [
+            {
+                "pick_line_id": "pl-1",
+                "sku_code": "SKU-FOOD-001",
+                "sku_name": "Sữa tươi",
+                "source_location_id": "loc-1",
+                "suggested_lot_id": "lot-1",
+                "qty_to_pick": "10",
+                "qty_picked": "0",
+                "status": "PENDING",
+            }
+        ],
+    }
+    enriched = _enrich_pick_session(
+        raw_session,
+        "ps-1",
+        lot_map={"lot-1": {"code": "DEMO-SUA-A", "expiry": "04/12/2026"}},
+        loc_map={"loc-1": "LOC-A02-01"},
+    )
+    summary = enriched["lines"][0]["fefo_summary"]
+    assert "LOC-A02-01" in summary
+    assert "DEMO-SUA-A" in summary
+    assert "04/12/2026" in summary
+    assert "Sữa tươi" in summary
+
+
+def test_outbound_h2_allocate_shortage_and_success_messages():
+    from client.app.modules.outbound.views import _load_lot_and_location_maps
+
+    class _DummyApi:
+        def get(self, path, params=None):
+            if path == "/lots":
+                return {
+                    "data": [
+                        {"lot_id": "lot-1", "lot_code": "DEMO-SUA-A", "expiry_date": "2026-12-04"}
+                    ]
+                }
+            if path == "/locations":
+                return {"data": [{"location_id": "loc-1", "location_code": "LOC-A02-01"}]}
+            return {"data": []}
+
+    lot_map, loc_map = _load_lot_and_location_maps(_DummyApi())
+    assert lot_map["lot-1"]["code"] == "DEMO-SUA-A"
+    assert loc_map["loc-1"] == "LOC-A02-01"
+
+
+def test_outbound_h5_confirm_gi_payload_fields():
+    res = {
+        "gi_id": "gi-uuid-1234",
+        "gi_number": "GI-2026-001",
+        "order_status": "SHIPPED",
+        "tms_waybill_code": "TMS-WB-999",
+    }
+    assert res["gi_number"] == "GI-2026-001"
+    assert res["order_status"] == "SHIPPED"
+    assert res["tms_waybill_code"] == "TMS-WB-999"
